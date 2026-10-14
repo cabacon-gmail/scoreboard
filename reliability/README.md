@@ -4,9 +4,42 @@ Tests that expose known reliability problems in the scoreboard and stay in place
 
 Everything here is self-contained. The root `build.xml`, `src/`, `tests/` and the rest of the repo are unchanged, and `ant test` never compiles or runs this suite.
 
-## Running it
+## Setting up a test machine
 
-Prerequisites: a JDK (11–21; the code compiles to Java 8), Apache Ant 1.10+, and git.
+You need Git, a JDK (11–21; the code compiles to Java 8) and Apache Ant 1.10+. Check all three from a new terminal:
+
+```
+git --version
+java -version
+ant -version
+```
+
+**Windows** (PowerShell):
+
+1. `winget install --id Git.Git -e` and `winget install --id EclipseAdoptium.Temurin.21.JDK -e`.
+2. Download `apache-ant-1.10.15-bin.zip` from https://ant.apache.org/bindownload.cgi and extract it to `C:\tools\apache-ant-1.10.15`.
+3. Add Ant to your user environment, then open a new PowerShell window:
+
+   ```powershell
+   [Environment]::SetEnvironmentVariable("ANT_HOME", "C:\tools\apache-ant-1.10.15", "User")
+   $p = [Environment]::GetEnvironmentVariable("Path", "User")
+   [Environment]::SetEnvironmentVariable("Path", "$p;C:\tools\apache-ant-1.10.15\bin", "User")
+   ```
+
+4. If `ant -version` complains about `JAVA_HOME`, set `JAVA_HOME` (User scope) to the JDK folder under `C:\Program Files\Eclipse Adoptium\`.
+
+**macOS**: with [Homebrew](https://brew.sh), run `brew install git ant openjdk@21`, then follow brew's note on linking `openjdk@21` so `java` is on your PATH.
+
+**Linux** (Debian/Ubuntu): `sudo apt install git ant ant-optional junit4 openjdk-21-jdk`.
+
+Clone into a folder that is **not synced by OneDrive, iCloud or Dropbox**. Sync clients lock files mid-run and cause failures that have nothing to do with the tests. Your home folder is usually safe.
+
+```
+git clone -b reliability https://github.com/cabacon-gmail/scoreboard.git crg-scoreboard
+cd crg-scoreboard
+```
+
+## Running it
 
 From the repository root:
 
@@ -54,6 +87,8 @@ ant -f reliability/build.xml verify -Dverify.skip.roottests=true     # skip the 
 | M11 | Rate verdicts work. |
 | M12 | The root `ant test` still passes. |
 | M13 | No file outside `reliability/` differs from `origin/dev`. Pass `-Dverify.base.ref=<ref>` to compare against another ref. |
+| M14 | Every manifest entry fails for its own reason. Unlisted, each test is `NEW_FAILURE` with text matching its `messagePattern`, and no pattern is so broad it would match a timeout, crash or generic exception. |
+| M15 | Every manifest entry's `notes` declares its trigger (see below). |
 | P1 | The F7 pilot fails for the right reason when unlisted. |
 | P3 | A simulated fix flips F7 to `UNEXPECTED_PASS`. |
 
@@ -71,9 +106,16 @@ Every test asserts the correct behaviour, so a test for an open issue fails. `ex
   "finding": "F7",
   "kind": "single",
   "messagePattern": "a regex found in the failure's toString()",
-  "notes": "optional"
+  "notes": "Trigger: natural (…) or Trigger: injected (…), then anything else"
 }
 ```
+
+`notes` must start with **`Trigger: natural`** or **`Trigger: injected`**, and `verify` (M15) enforces this:
+
+- **Natural**: the test reaches the bug through a realistic sequence of crew actions and conditions, for example two devices pressing Stop within 400 ms.
+- **Injected**: the test plants a fault to open the window the bug lives in, for example a listener that throws during an undo. An injected test proves the code is fragile, not how often the bug happens at a real game.
+
+Say briefly in parentheses what the trigger is.
 
 Rate tests use `"kind": "rate"` and `"baselineRate"` (the failure rate when the entry was added) instead of `messagePattern`.
 
@@ -96,10 +138,12 @@ An invalid manifest stops the run before any test, with a message naming the ent
 ## Adding a test
 
 1. Write a class whose name ends in `ReliabilityTest` under `reliability/tests/`. Use the product's own package when you need package-private access.
-2. Make it assert the behaviour a crew needs. Put the finding ID at the start of the assertion message, for example `"F7: Start Jam had no effect …"`.
-3. Run with `-Donly=<YourClass>`. Confirm the verdict is `NEW_FAILURE`, and that its failure text matches the finding.
-4. Add its entry to `expected-failures.json`. Run the full suite and confirm `KNOWN`.
+2. Make it assert the behaviour a crew needs. Start the assertion message with the finding ID, for example `"F7: Start Jam had no effect …"`.
+3. Run with `-Donly=<YourClass>`. Confirm the verdict is `NEW_FAILURE`, and that the failure text describes the finding.
+4. Add its entry to `expected-failures.json`, with a `messagePattern` specific to that finding and a `Trigger:` note. Run `ant -f reliability/build.xml verify`. M14 confirms the test fails for its own reason; M15 checks the note.
 5. When a fix lands, the test reports `UNEXPECTED_PASS`; delete its manifest entry in the same change.
+
+Simulated fixes like the F7 pilot's P3 are optional. Add one only when a fix is a small, obvious patch, because it is tied to the current text of the product source.
 
 For race-dependent scenarios, use `com.carolinarollergirls.scoreboard.reliability.support.RateTest.run(iterations, body)`.
 

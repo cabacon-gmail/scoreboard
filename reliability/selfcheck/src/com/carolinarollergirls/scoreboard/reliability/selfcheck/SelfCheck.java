@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeSet;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 import javax.tools.JavaCompiler;
@@ -148,6 +149,10 @@ public final class SelfCheck {
         // M12-M13: the existing build is untouched.
         checkM12();
         checkM13();
+
+        // M14-M15: properties every manifest entry must have.
+        checkM14(manifestJson);
+        checkM15(manifestJson);
 
         // Pilot steps that can be automated.
         checkP1(manifestJson);
@@ -387,6 +392,71 @@ public final class SelfCheck {
             results.add(
                 new CheckResult("M13", title, Status.FAIL, "changed: " + shorten(diff.trim().replace('\n', ' '))));
         }
+    }
+
+    /** Every manifest entry, when removed, makes its test fail as NEW_FAILURE for the reason the entry names. */
+    void checkM14(Map<String, Object> manifestJson) throws Exception {
+        String title = "Every manifest entry fails for its own reason: unlisted, its test is NEW_FAILURE with "
+                       + "matching text, and its messagePattern is specific";
+        List<Map<String, Object>> all = entries(manifestJson);
+        List<String> p = new ArrayList<>();
+        int i = 0;
+        for (Map<String, Object> entry : all) {
+            String test = (String) entry.get("test");
+            String className = test.substring(0, test.indexOf('#'));
+            List<Map<String, Object>> others = new ArrayList<>(all);
+            others.remove(entry);
+            File m = manifest("m14-" + (++i), others);
+            SuiteRun r = run("m14-unlisted-" + i, m, testClasses, null, "--only", "^" + Pattern.quote(className) + "$");
+            String v = r.verdict(test);
+            String text = r.failureTexts.get(test);
+            String id = entry.get("finding") + " " + shortName(test);
+            if (!"NEW_FAILURE".equals(v)) {
+                p.add(id + " is " + v + " (expected NEW_FAILURE)");
+            } else if ("rate".equals(entry.get("kind"))) {
+                if (text == null || !text.contains("RATE failures=")) { p.add(id + ": not a rate failure: " + text); }
+            } else {
+                Pattern pattern = Pattern.compile((String) entry.get("messagePattern"));
+                if (text == null || !pattern.matcher(text).find()) {
+                    p.add(id + ": failure text does not match messagePattern: " + shorten(String.valueOf(text)));
+                }
+                for (String generic : GENERIC_FAILURES) {
+                    if (pattern.matcher(generic).find()) {
+                        p.add(id + ": messagePattern is too broad; it also matches '" + generic + "'");
+                        break;
+                    }
+                }
+            }
+        }
+        add("M14", title, p, all.size() + " entr" + (all.size() == 1 ? "y" : "ies") + " checked");
+    }
+
+    /** Failure texts that say nothing about a finding; no messagePattern may match them. */
+    static final List<String> GENERIC_FAILURES = Arrays.asList(
+        "", "TIMEOUT after 600s", "CHILD_CRASH exit=1", "NOT_RUN by JUnit", "java.lang.NullPointerException",
+        "java.lang.AssertionError", "java.lang.IllegalStateException: injected listener failure");
+
+    static final Pattern TRIGGER_NOTE = Pattern.compile("^Trigger: (natural|injected)\\b");
+
+    /** Every manifest entry says whether its trigger is natural (crew actions) or injected (a planted fault). */
+    void checkM15(Map<String, Object> manifestJson) {
+        List<String> p = new ArrayList<>();
+        for (Map<String, Object> entry : entries(manifestJson)) {
+            Object notes = entry.get("notes");
+            if (!(notes instanceof String) || !TRIGGER_NOTE.matcher((String) notes).find()) {
+                p.add(entry.get("finding") + " " + shortName((String) entry.get("test")) +
+                      ": notes must start with 'Trigger: natural' or 'Trigger: injected'");
+            }
+        }
+        add("M15", "Every manifest entry's notes start with 'Trigger: natural' or 'Trigger: injected'", p,
+            "all entries declare their trigger");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> entries(Map<String, Object> manifestJson) {
+        List<Map<String, Object>> list = new ArrayList<>();
+        for (Object e : (List<?>) manifestJson.get("expectedFailures")) { list.add((Map<String, Object>) e); }
+        return list;
     }
 
     void checkP1(Map<String, Object> manifestJson) throws Exception {

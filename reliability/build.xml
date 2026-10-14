@@ -1,0 +1,100 @@
+<?xml version="1.0"?>
+<!--
+    Standalone build for the CRG ScoreBoard reliability suite.
+
+    Run from the repository root:
+        ant -f reliability/build.xml            (same as the "reliability" target)
+        ant -f reliability/build.xml clean
+
+    This file is deliberately separate from the root build.xml: the root
+    build never compiles or runs anything under reliability/, and this
+    build only calls the root "compile" target to build the product.
+    See reliability/README.md.
+-->
+<project name="CRG ScoreBoard reliability suite" default="reliability" basedir=".">
+	<property name="repo.dir" location=".."/>
+	<property name="product.classes" location="${repo.dir}/build-ant"/>
+	<property name="build.dir" location="build"/>
+	<property name="report.dir" location="${build.dir}/report"/>
+	<property name="work.dir" location="${build.dir}/work"/>
+	<property name="manifest.file" location="expected-failures.json"/>
+	<property name="class.timeout.seconds" value="600"/>
+	<property name="rate.scale" value="1.0"/>
+	<property name="only" value=""/>
+
+	<property name="runner.classes" location="${build.dir}/runner-classes"/>
+	<property name="test.classes" location="${build.dir}/test-classes"/>
+
+	<path id="classpath.product">
+		<pathelement location="${product.classes}"/>
+		<fileset dir="${repo.dir}/lib" includes="deps/*.jar"/>
+		<pathelement location="${repo.dir}/test-libs/junit-4.13.2.jar"/>
+		<pathelement location="${repo.dir}/test-libs/hamcrest-2.2.jar"/>
+	</path>
+
+	<path id="classpath.tests">
+		<path refid="classpath.product"/>
+		<pathelement location="${runner.classes}"/>
+	</path>
+
+	<path id="classpath.run">
+		<path refid="classpath.tests"/>
+		<pathelement location="${test.classes}"/>
+	</path>
+
+	<target name="product" description="Build the product exactly as the root build does">
+		<ant antfile="build.xml" dir="${repo.dir}" target="compile" inheritAll="false" useNativeBasedir="true"/>
+	</target>
+
+	<!-- Both compile targets start from an empty directory so classes of deleted sources never run. -->
+	<target name="compile-runner" depends="product">
+		<delete dir="${runner.classes}" quiet="true"/>
+		<mkdir dir="${runner.classes}"/>
+		<javac srcdir="src" destdir="${runner.classes}" source="1.8" target="1.8"
+		       includeantruntime="false" debug="true" encoding="UTF-8">
+			<compilerarg value="-Xlint:all"/>
+			<compilerarg value="-Xlint:-serial"/>
+			<compilerarg value="-Xlint:-options"/>
+			<classpath refid="classpath.product"/>
+		</javac>
+	</target>
+
+	<target name="compile-tests" depends="compile-runner">
+		<delete dir="${test.classes}" quiet="true"/>
+		<mkdir dir="${test.classes}"/>
+		<javac srcdir="tests" destdir="${test.classes}" source="1.8" target="1.8"
+		       includeantruntime="false" debug="true" encoding="UTF-8">
+			<compilerarg value="-Xlint:all"/>
+			<compilerarg value="-Xlint:-serial"/>
+			<compilerarg value="-Xlint:-options"/>
+			<classpath refid="classpath.tests"/>
+		</javac>
+	</target>
+
+	<target name="reliability" depends="compile-tests" description="Run the reliability suite against the manifest">
+		<pathconvert property="run.classpath" refid="classpath.run"/>
+		<java classname="com.carolinarollergirls.scoreboard.reliability.runner.ReliabilityMain"
+		      fork="true" dir="${repo.dir}" failonerror="false" resultproperty="runner.exit">
+			<classpath refid="classpath.run"/>
+			<arg value="--manifest"/><arg value="${manifest.file}"/>
+			<arg value="--test-classes"/><arg value="${test.classes}"/>
+			<arg value="--report-dir"/><arg value="${report.dir}"/>
+			<arg value="--work-dir"/><arg value="${work.dir}"/>
+			<arg value="--repo-dir"/><arg value="${repo.dir}"/>
+			<arg value="--classpath"/><arg value="${run.classpath}"/>
+			<arg value="--class-timeout"/><arg value="${class.timeout.seconds}"/>
+			<arg value="--rate-scale"/><arg value="${rate.scale}"/>
+			<arg value="--only"/><arg value="${only}"/>
+		</java>
+		<fail message="Reliability run found blocking verdicts (exit code 1). See ${report.dir}/summary.txt">
+			<condition><equals arg1="${runner.exit}" arg2="1"/></condition>
+		</fail>
+		<fail message="Reliability runner infrastructure error (exit code ${runner.exit}).">
+			<condition><not><equals arg1="${runner.exit}" arg2="0"/></not></condition>
+		</fail>
+	</target>
+
+	<target name="clean" description="Delete reliability/build/ (never touches product build output)">
+		<delete dir="${build.dir}" quiet="true"/>
+	</target>
+</project>

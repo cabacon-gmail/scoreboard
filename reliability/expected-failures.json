@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "expectedFailures": [
+    {
+      "test": "com.carolinarollergirls.scoreboard.reliability.canary.CanaryReliabilityTest#plantedFailureIsReportedAsKnown",
+      "finding": "F0",
+      "kind": "single",
+      "messagePattern": "canary: intentional failure",
+      "notes": "Permanent canary proving the manifest mechanism works on every run."
+    },
+    {
+      "test": "com.carolinarollergirls.scoreboard.core.game.UndoReliabilityTest#controlsStillWorkAfterUndoRestoreFails",
+      "finding": "F7",
+      "kind": "single",
+      "messagePattern": "F7: Start Jam had no effect after an undo whose restore failed",
+      "notes": "Pilot test. Fails while an exception during undo leaves restoreRunning set."
+    }
+  ]
+}

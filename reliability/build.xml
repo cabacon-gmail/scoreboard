@@ -94,6 +94,68 @@
 		</fail>
 	</target>
 
+	<!--
+	    Programmatic verification of the suite itself: checks M1-M13 and pilot steps P1 and P3 from the
+	    Phase 0 design. Never edits tracked files; everything it creates lives under reliability/build/verify/.
+	        ant -f reliability/build.xml verify
+	        ant -f reliability/build.xml verify -Dverify.skip.roottests=true   (skip the slow root 'ant test')
+	-->
+	<property name="selfcheck.classes" location="${build.dir}/selfcheck-classes"/>
+	<property name="fixture.classes" location="${build.dir}/fixture-classes"/>
+	<property name="verify.dir" location="${build.dir}/verify"/>
+	<property name="verify.base.ref" value="origin/dev"/>
+
+	<target name="compile-selfcheck" depends="compile-tests">
+		<delete dir="${selfcheck.classes}" quiet="true"/>
+		<delete dir="${fixture.classes}" quiet="true"/>
+		<mkdir dir="${selfcheck.classes}"/>
+		<mkdir dir="${fixture.classes}"/>
+		<javac srcdir="selfcheck/src" destdir="${selfcheck.classes}" source="1.8" target="1.8"
+		       includeantruntime="false" debug="true" encoding="UTF-8">
+			<compilerarg value="-Xlint:all"/>
+			<compilerarg value="-Xlint:-serial"/>
+			<compilerarg value="-Xlint:-options"/>
+			<classpath refid="classpath.tests"/>
+		</javac>
+		<javac srcdir="selfcheck/fixtures" destdir="${fixture.classes}" source="1.8" target="1.8"
+		       includeantruntime="false" debug="true" encoding="UTF-8">
+			<compilerarg value="-Xlint:all"/>
+			<compilerarg value="-Xlint:-serial"/>
+			<compilerarg value="-Xlint:-options"/>
+			<classpath refid="classpath.tests"/>
+		</javac>
+	</target>
+
+	<!-- M12: the root build's own compile and test targets, unless skipped. -->
+	<target name="-verify-root-build" unless="verify.skip.roottests">
+		<ant antfile="build.xml" dir="${repo.dir}" target="test" inheritAll="false" useNativeBasedir="true"/>
+		<property name="verify.root.status" value="passed"/>
+	</target>
+
+	<target name="verify" depends="compile-selfcheck,-verify-root-build"
+	        description="Verify the suite itself (checks M1-M13, P1, P3); never edits tracked files">
+		<property name="verify.root.status" value="skipped"/>
+		<pathconvert property="verify.run.classpath" refid="classpath.run"/>
+		<java classname="com.carolinarollergirls.scoreboard.reliability.selfcheck.SelfCheck"
+		      fork="true" dir="${repo.dir}" failonerror="false" resultproperty="verify.exit">
+			<classpath>
+				<path refid="classpath.run"/>
+				<pathelement location="${selfcheck.classes}"/>
+			</classpath>
+			<arg value="--repo-dir"/><arg value="${repo.dir}"/>
+			<arg value="--run-classpath"/><arg value="${verify.run.classpath}"/>
+			<arg value="--test-classes"/><arg value="${test.classes}"/>
+			<arg value="--fixture-classes"/><arg value="${fixture.classes}"/>
+			<arg value="--manifest"/><arg value="${manifest.file}"/>
+			<arg value="--work-root"/><arg value="${verify.dir}"/>
+			<arg value="--base-ref"/><arg value="${verify.base.ref}"/>
+			<arg value="--root-build"/><arg value="${verify.root.status}"/>
+		</java>
+		<fail message="Verification failed. See ${verify.dir}/verify-summary.txt">
+			<condition><not><equals arg1="${verify.exit}" arg2="0"/></not></condition>
+		</fail>
+	</target>
+
 	<target name="clean" description="Delete reliability/build/ (never touches product build output)">
 		<delete dir="${build.dir}" quiet="true"/>
 	</target>

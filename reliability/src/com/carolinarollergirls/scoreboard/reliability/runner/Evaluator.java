@@ -87,7 +87,7 @@ public final class Evaluator {
         }
         if (!failed) {
             return new Outcome(test, e, r, Verdict.UNEXPECTED_PASS,
-                               "issue " + e.getFinding() + " looks fixed — remove its manifest entry", null);
+                               "issue " + e.getFinding() + " looks fixed; remove its manifest entry", null);
         }
         if (e.getKind() == ManifestEntry.Kind.SINGLE) {
             String text = r.getFailureText() == null ? "" : r.getFailureText();

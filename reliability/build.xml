@@ -46,7 +46,9 @@
 		<ant antfile="build.xml" dir="${repo.dir}" target="compile" inheritAll="false" useNativeBasedir="true"/>
 	</target>
 
+	<!-- Both compile targets start from an empty directory so classes of deleted sources never run. -->
 	<target name="compile-runner" depends="product">
+		<delete dir="${runner.classes}" quiet="true"/>
 		<mkdir dir="${runner.classes}"/>
 		<javac srcdir="src" destdir="${runner.classes}" source="1.8" target="1.8"
 		       includeantruntime="false" debug="true" encoding="UTF-8">
@@ -58,6 +60,7 @@
 	</target>
 
 	<target name="compile-tests" depends="compile-runner">
+		<delete dir="${test.classes}" quiet="true"/>
 		<mkdir dir="${test.classes}"/>
 		<javac srcdir="tests" destdir="${test.classes}" source="1.8" target="1.8"
 		       includeantruntime="false" debug="true" encoding="UTF-8">

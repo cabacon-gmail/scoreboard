@@ -33,6 +33,34 @@ The build succeeds when no test has a blocking verdict, and fails otherwise. Res
 
 Each test class runs in its own JVM, with its own working directory under `reliability/build/work/<ClassName>/`. That directory starts with a copy of the repo's `config/` (without `config/autosave/`), and anything the product writes lands there, never in the repo.
 
+## Verifying the suite itself
+
+```
+ant -f reliability/build.xml verify                                  # everything, including the root 'ant test'
+ant -f reliability/build.xml verify -Dverify.skip.roottests=true     # skip the slow root 'ant test'
+```
+
+`verify` checks that the runner and the pilot behave as the Phase 0 design requires, one check per item:
+
+| Check | What it proves |
+| --- | --- |
+| M1 | The real suite exits 0; every manifest entry is known; the canary and smoke tests behave. |
+| M2 | All report files and scorecard fields are present. |
+| M3 | Tests write only into their own work dirs, never the repo. |
+| M4–M7 | `NEW_FAILURE`, `UNEXPECTED_PASS`, `WRONG_FAILURE` and `STALE_ENTRY` each fail the run. |
+| M8 | `--only` runs just the matching classes. |
+| M9 | Invalid manifests are rejected before any test runs. |
+| M10 | Class timeouts work. |
+| M11 | Rate verdicts work. |
+| M12 | The root `ant test` still passes. |
+| M13 | No file outside `reliability/` differs from `origin/dev`. Pass `-Dverify.base.ref=<ref>` to compare against another ref. |
+| P1 | The F7 pilot fails for the right reason when unlisted. |
+| P3 | A simulated fix flips F7 to `UNEXPECTED_PASS`. |
+
+It never edits tracked files. Every scenario uses temporary manifests and the fixture tests in `selfcheck/fixtures/`, which are never part of the real suite. P3 compiles a patched copy of `GameImpl` into a scratch directory. Everything it writes goes under `reliability/build/verify/`. Read `verify-summary.txt` there first; each scenario has its own report and `runner-output.txt`.
+
+A check is skipped rather than failed when it can't run. That happens for M12 with `-Dverify.skip.roottests=true`, for M13 when the base ref isn't fetched, and for P3 if `GameImpl.java` has changed so the simulated fix no longer applies.
+
 ## How expected failures work
 
 Every test asserts the correct behaviour, so a test for an open issue fails. `expected-failures.json` lists those tests:

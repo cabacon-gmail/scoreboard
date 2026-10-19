@@ -14,6 +14,34 @@
       "kind": "single",
       "messagePattern": "F7: Start Jam had no effect after an undo whose restore failed",
       "notes": "Trigger: injected (a listener throws during the undo restore). Pilot test. Fails while an exception during undo leaves restoreRunning set."
+    },
+    {
+      "test": "com.carolinarollergirls.scoreboard.core.game.TransactionReliabilityTest#startJamIsAllOrNothingWhenAListenerFails",
+      "finding": "F9",
+      "kind": "single",
+      "messagePattern": "F9: Start Jam was half-applied",
+      "notes": "Trigger: injected (a listener throws while Start Jam is in progress). Start Jam is left half-applied: in a jam with the jam clock stopped."
+    },
+    {
+      "test": "com.carolinarollergirls.scoreboard.json.AutosaveLockReliabilityTest#latestChangeSurvivesWhenNewestAutosaveIsLocked",
+      "finding": "F12",
+      "kind": "single",
+      "messagePattern": "F12: the latest change was not autosaved",
+      "notes": "Trigger: injected (another process holds the newest autosave file open, as antivirus or sync tools do). Windows only; SKIPPED elsewhere. Expectation is provisional pending the autosave-semantics decision."
+    },
+    {
+      "test": "com.carolinarollergirls.scoreboard.json.AutosaveLoadReliabilityTest#rejectedNewestAutosaveLeavesNoTrace",
+      "finding": "F13",
+      "kind": "single",
+      "messagePattern": "F13: state from the rejected newest autosave leaked",
+      "notes": "Trigger: injected (the newest autosave holds a value this version cannot parse, e.g. written by a newer version or damaged). Entries that exist only in the rejected file survive the fallback. Expectation is provisional pending the autosave-semantics decision."
+    },
+    {
+      "test": "com.carolinarollergirls.scoreboard.json.FanOutReliabilityTest#updatesSurviveClientsConnectingAndDisconnecting",
+      "finding": "F14",
+      "kind": "rate",
+      "baselineRate": 0.45,
+      "notes": "Trigger: natural (clients connecting and disconnecting while the scoreboard changes, as tablets do on venue Wi-Fi). Rate depends on the machine; baseline measured on Linux (0.42-0.53 over four runs of 200 iterations)."
     }
   ]
 }

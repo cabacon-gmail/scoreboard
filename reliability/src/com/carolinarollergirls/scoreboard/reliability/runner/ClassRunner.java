@@ -21,6 +21,8 @@ import org.junit.runner.notification.RunListener;
 
 import com.fasterxml.jackson.jr.ob.JSON;
 
+import com.carolinarollergirls.scoreboard.reliability.support.CapturingLogger;
+
 /**
  * Runs one test class with JUnit and writes its results as JSON.
  * <p>
@@ -54,6 +56,8 @@ public final class ClassRunner {
 
     /** Runs {@code className} in this JVM and returns one result per test method. */
     public static List<TestResult> run(String className, File resultsFile) throws Exception {
+        // Without a product logger, Logger.printStackTrace throws NullPointerException; only Main installs one.
+        CapturingLogger.installIfAbsent();
         Class<?> testClass = Class.forName(className);
         Recorder recorder = new Recorder(resultsFile);
         recorder.write();

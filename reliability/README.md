@@ -145,6 +145,14 @@ An invalid manifest stops the run before any test, with a message naming the ent
 
 Simulated fixes like the F7 pilot's P3 are optional. Add one only when a fix is a small, obvious patch, because it is tied to the current text of the product source.
 
-For race-dependent scenarios, use `com.carolinarollergirls.scoreboard.reliability.support.RateTest.run(iterations, body)`.
+Helpers in `com.carolinarollergirls.scoreboard.reliability.support`:
+
+| Helper | Use it to |
+| --- | --- |
+| `ProductFixture.start()` | Start the product the way `Main` does: global clock stopped, quick-clock detection off, `Version` loaded, and the JSON listener attached (without it, autosaves are empty). Then use `.sb()` and `.game()`. |
+| `ProductFixture.newScoreBoard()`, `finishStartup(sb)` | Create a second scoreboard, for example to restore an autosave into. |
+| `CapturingLogger` | Capture what the product logs (`new CapturingLogger()`, then `contains(...)`). The runner installs one for every class anyway, because the product's `Logger.printStackTrace` crashes without a logger. |
+| `Platform.assumeWindows(why)` | Run a test only on Windows. Elsewhere it is reported as `SKIPPED`, which never fails a run, and `verify` accepts a skipped entry for that OS. |
+| `RateTest.run(iterations, body)` | Race-dependent scenarios that report a failure rate. Use distinct objects per iteration: non-capturing lambdas are a single shared instance. |
 
 Format Java sources with the repository's `.clang-format`.

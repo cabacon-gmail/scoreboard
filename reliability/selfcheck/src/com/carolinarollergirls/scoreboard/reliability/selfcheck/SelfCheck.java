@@ -173,7 +173,8 @@ public final class SelfCheck {
             Map<?, ?> entry = (Map<?, ?>) e;
             String test = (String) entry.get("test");
             String v = r.verdict(test);
-            if (!"KNOWN".equals(v) && !"KNOWN_RATE".equals(v) && !"RATE_REGRESSION".equals(v)) {
+            // SKIPPED: a platform-specific test on another OS (e.g. F12 off Windows).
+            if (!"KNOWN".equals(v) && !"KNOWN_RATE".equals(v) && !"RATE_REGRESSION".equals(v) && !"SKIPPED".equals(v)) {
                 problems.add(test + " is " + v + " (expected a known verdict for " + entry.get("finding") + ")");
             }
         }
@@ -400,18 +401,32 @@ public final class SelfCheck {
                        + "matching text, and its messagePattern is specific";
         List<Map<String, Object>> all = entries(manifestJson);
         List<String> p = new ArrayList<>();
+        List<String> skipped = new ArrayList<>();
         int i = 0;
         for (Map<String, Object> entry : all) {
             String test = (String) entry.get("test");
             String className = test.substring(0, test.indexOf('#'));
+            String id = entry.get("finding") + " " + shortName(test);
+            // Pattern specificity does not depend on running the test, so it is checked on every OS.
+            if (!"rate".equals(entry.get("kind"))) {
+                Pattern pattern = Pattern.compile((String) entry.get("messagePattern"));
+                for (String generic : GENERIC_FAILURES) {
+                    if (pattern.matcher(generic).find()) {
+                        p.add(id + ": messagePattern is too broad; it also matches '" + generic + "'");
+                        break;
+                    }
+                }
+            }
             List<Map<String, Object>> others = new ArrayList<>(all);
             others.remove(entry);
             File m = manifest("m14-" + (++i), others);
             SuiteRun r = run("m14-unlisted-" + i, m, testClasses, null, "--only", "^" + Pattern.quote(className) + "$");
             String v = r.verdict(test);
             String text = r.failureTexts.get(test);
-            String id = entry.get("finding") + " " + shortName(test);
-            if (!"NEW_FAILURE".equals(v)) {
+            if ("SKIPPED".equals(v)) {
+                // Platform-specific test (e.g. Windows only); it is checked when verify runs on that platform.
+                skipped.add(id);
+            } else if (!"NEW_FAILURE".equals(v)) {
                 p.add(id + " is " + v + " (expected NEW_FAILURE)");
             } else if ("rate".equals(entry.get("kind"))) {
                 if (text == null || !text.contains("RATE failures=")) { p.add(id + ": not a rate failure: " + text); }
@@ -420,15 +435,11 @@ public final class SelfCheck {
                 if (text == null || !pattern.matcher(text).find()) {
                     p.add(id + ": failure text does not match messagePattern: " + shorten(String.valueOf(text)));
                 }
-                for (String generic : GENERIC_FAILURES) {
-                    if (pattern.matcher(generic).find()) {
-                        p.add(id + ": messagePattern is too broad; it also matches '" + generic + "'");
-                        break;
-                    }
-                }
             }
         }
-        add("M14", title, p, all.size() + " entr" + (all.size() == 1 ? "y" : "ies") + " checked");
+        String detail = (all.size() - skipped.size()) + " of " + all.size() + " entries checked here";
+        if (!skipped.isEmpty()) { detail += "; skipped on this OS: " + String.join(", ", skipped); }
+        add("M14", title, p, detail);
     }
 
     /** Failure texts that say nothing about a finding; no messagePattern may match them. */

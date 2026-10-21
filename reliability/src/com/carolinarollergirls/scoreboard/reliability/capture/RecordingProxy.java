@@ -52,11 +52,14 @@ public final class RecordingProxy {
         o.put("--target", "127.0.0.1:8001");
         o.put("--out", "");
         o.put("--assemble", "");
+        o.put("--redact", "true");
+        o.put("--crg", "");
         for (String a : args) {
             int eq = a.indexOf('=');
             if (eq < 0 || !o.containsKey(a.substring(0, eq))) {
-                System.err.println("usage: RecordingProxy [--listen=8000] [--bind=0.0.0.0] [--target=127.0.0.1:8001] "
-                                   + "[--out=<dir>] | --assemble=<capture dir>");
+                System.err.println("usage: java -jar crg-recorder.jar [--crg=lib/crg-scoreboard.jar] [--listen=8000] "
+                                   + "[--bind=0.0.0.0] [--target=127.0.0.1:8001] [--out=<dir>] [--redact=true|false]\n"
+                                   + "       java -jar crg-recorder.jar --assemble=<capture dir>");
                 System.exit(2);
             }
             o.put(a.substring(0, eq), a.substring(eq + 1));
@@ -67,19 +70,76 @@ public final class RecordingProxy {
             return;
         }
         String out = o.get("--out");
-        if (out.isEmpty()) {
-            out = "reliability/captures/" + new SimpleDateFormat("yyyy-MM-dd_HHmmss").format(new Date());
-        }
+        if (out.isEmpty()) { out = "captures/" + new SimpleDateFormat("yyyy-MM-dd_HHmmss").format(new Date()); }
         String[] target = o.get("--target").split(":");
+        Process crg = null;
+        if (!o.get("--crg").isEmpty()) { crg = startCrg(new File(o.get("--crg")), target[0], Integer.parseInt(target[1])); }
         RecordingProxy p = new RecordingProxy(o.get("--bind"), Integer.parseInt(o.get("--listen")), target[0],
                                               Integer.parseInt(target[1]), new File(out));
+        p.redact = Boolean.parseBoolean(o.get("--redact"));
+        final Process child = crg;
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            shuttingDown = true;
+            p.stop();
+            if (child != null) { stopCrg(child); }
+        }, "RecordingProxy-finish"));
         p.start();
-        Runtime.getRuntime().addShutdownHook(new Thread(p::stop, "RecordingProxy-finish"));
-        System.out.println("Recording to " + new File(out).getAbsolutePath());
+        if (child != null) {
+            // If CRG stops, nothing can be recorded and devices can't reach it: say so and stop too.
+            Thread watch = new Thread(() -> {
+                try {
+                    int code = child.waitFor();
+                    if (!shuttingDown) {
+                        System.err.println("CRG exited (code " + code + "); stopping the recorder.");
+                        System.exit(1);
+                    }
+                } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+            }, "RecordingProxy-crg-watch");
+            watch.setDaemon(true);
+            watch.start();
+        }
+        System.out.println("Recording to " + new File(out).getAbsolutePath() +
+                           (p.redact ? " (names redacted)" : " (names NOT redacted)"));
         System.out.println("Open the scoreboard on other devices at:");
         for (String u : p.urls()) { System.out.println("    " + u); }
         System.out.println("Press Ctrl-C to stop; the trace is written then.");
         Thread.currentThread().join();
+    }
+
+    /**
+     * Starts CRG from its jar, as its own launcher does but on a port only this computer can reach, and waits until
+     * it answers. Its output goes to {@code crg-output.log} next to the jar's folder.
+     */
+    static Process startCrg(File jar, String host, int port) throws IOException, InterruptedException {
+        File jarFile = jar.getAbsoluteFile();
+        if (!jarFile.isFile()) { throw new IOException("CRG jar not found: " + jarFile); }
+        File crgDir = jarFile.getParentFile().getParentFile(); // <crg>/lib/crg-scoreboard.jar
+        String java = new File(new File(System.getProperty("java.home"), "bin"), "java").getPath();
+        ProcessBuilder pb = new ProcessBuilder(java, "-jar", jarFile.getPath(), "--port=" + port, "--host=" + host)
+                                .directory(crgDir)
+                                .redirectErrorStream(true)
+                                .redirectOutput(ProcessBuilder.Redirect.appendTo(new File(crgDir, "crg-output.log")));
+        Process p = pb.start();
+        System.out.println("Starting CRG from " + crgDir + " ...");
+        for (int i = 0; i < 300; i++) {
+            if (!p.isAlive()) { throw new IOException("CRG exited during start-up; see " + new File(crgDir, "crg-output.log")); }
+            try {
+                HttpURLConnection c = (HttpURLConnection) new URL("http://" + host + ":" + port + "/urls/").openConnection();
+                c.setConnectTimeout(500);
+                if (c.getResponseCode() == 200) { return p; }
+            } catch (IOException e) { /* not up yet */ }
+            Thread.sleep(200);
+        }
+        p.destroyForcibly();
+        throw new IOException("CRG did not start within 60 s; see " + new File(crgDir, "crg-output.log"));
+    }
+
+    /** Asks CRG to stop the way closing its window does, then waits for it. */
+    static void stopCrg(Process p) {
+        p.destroy();
+        try {
+            if (!p.waitFor(20, java.util.concurrent.TimeUnit.SECONDS)) { p.destroyForcibly(); }
+        } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
     }
 
     public RecordingProxy(String bind, int listenPort, String targetHost, int targetPort, File dir) {
@@ -93,8 +153,9 @@ public final class RecordingProxy {
     /** Takes the starting state from CRG, opens the listening port and starts accepting. */
     public void start() throws IOException {
         dir.mkdirs();
+        redactor = redact ? new Redactor() : null;
         Map<String, Object> extras = saveSeed();
-        writer = new CaptureWriter(dir, extras);
+        writer = new CaptureWriter(dir, extras, redactor);
         server = new ServerSocket();
         server.setReuseAddress(true);
         server.bind(new InetSocketAddress(bind, listenPort));
@@ -331,7 +392,15 @@ public final class RecordingProxy {
                     Map<String, Object> f = new LinkedHashMap<>();
                     f.put("field", part.name);
                     f.put("name", part.filename);
-                    f.put("from", writer.saveFile(part.filename, part.content));
+                    byte[] content = part.content;
+                    if (redactor != null && path.toLowerCase().startsWith("/load/")) {
+                        content = redactUpload(path, content);
+                        if (content == null) {
+                            content = new byte[0];
+                            f.put("redacted", "content not kept: names can't be removed from this kind of file");
+                        }
+                    }
+                    f.put("from", writer.saveFile(part.filename, content));
                     files.add(f);
                 }
             }
@@ -341,6 +410,19 @@ public final class RecordingProxy {
             path = path + (path.contains("?") ? "&" : "?") + qs;
         }
         writer.http(cookie, req.first(), path, form, files);
+    }
+
+    /** A loaded JSON game has its names redacted; other loads (spreadsheets) can't be, so return null. */
+    @SuppressWarnings("unchecked")
+    private byte[] redactUpload(String path, byte[] content) {
+        if (!path.toLowerCase().startsWith("/load/json")) { return null; }
+        try {
+            Map<String, Object> root = new LinkedHashMap<>(JSON.std.mapFrom(content));
+            if (root.get("state") instanceof Map) {
+                root.put("state", redactor.state((Map<String, Object>) root.get("state")));
+            }
+            return JSON.std.asBytes(root);
+        } catch (IOException e) { return null; }
     }
 
     /** The addresses devices can use, as CRG's own /urls lists them, but on the proxy's port. */
@@ -383,7 +465,7 @@ public final class RecordingProxy {
             if (!e.getKey().startsWith("ScoreBoard.Clients.")) { kept.put(e.getKey(), e.getValue()); }
         }
         Map<String, Object> seed = new LinkedHashMap<>();
-        seed.put("state", kept);
+        seed.put("state", redactor != null ? redactor.state(kept) : kept);
         JSON.std.with(JSON.Feature.PRETTY_PRINT_OUTPUT).write(seed, new File(dir, CaptureWriter.SEED));
         Map<String, Object> extras = new LinkedHashMap<>();
         StringBuilder version = new StringBuilder();
@@ -394,6 +476,7 @@ public final class RecordingProxy {
             }
         }
         extras.put("crgVersion", version.length() > 0 ? version.toString() : "unknown");
+        extras.put("redacted", redactor != null);
         extras.put("notes", "Captured by RecordingProxy from " + targetHost + ":" + targetPort + " starting " +
                                 new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date()));
         return extras;
@@ -444,5 +527,9 @@ public final class RecordingProxy {
     private final List<Socket> open = new ArrayList<>();
     private ServerSocket server;
     private CaptureWriter writer;
+    private static volatile boolean shuttingDown;
+    /** Redact names (the default). Set before {@link #start}. */
+    public boolean redact = true;
+    private Redactor redactor;
     private boolean stopped;
 }

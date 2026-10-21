@@ -100,23 +100,52 @@
 	</target>
 
 	<!--
-	    Recording proxy for real games: start CRG on a local-only port first, e.g.
-	        java -jar lib/crg-scoreboard.jar -p=8001 -h=127.0.0.1
-	    then
-	        ant -f reliability/build.xml record [-Drecord.listen=8000] [-Drecord.target=127.0.0.1:8001] [-Drecord.out=dir]
-	    Ctrl-C stops it and writes the trace.
+	    Recording proxy for real games (see reliability/RECORDING.md).
+	    From a checkout, against a CRG already running on a local-only port:
+	        ant -f reliability/build.xml record [-Drecord.listen=8000] [-Drecord.target=127.0.0.1:8001]
+	    For a crew's laptop, build one file to copy next to CRG:
+	        ant -f reliability/build.xml recorder-jar      (writes reliability/build/recorder/)
 	-->
 	<property name="record.listen" value="8000"/>
 	<property name="record.target" value="127.0.0.1:8001"/>
-	<property name="record.out" value=""/>
-	<target name="record" depends="compile-runner" description="Run the recording proxy in front of CRG">
+	<property name="record.redact" value="true"/>
+	<target name="record" depends="compile-runner" description="Run the recording proxy in front of a running CRG">
+		<tstamp><format property="record.stamp" pattern="yyyy-MM-dd_HHmmss"/></tstamp>
+		<property name="record.out" value="${basedir}/captures/${record.stamp}"/>
 		<java classname="com.carolinarollergirls.scoreboard.reliability.capture.RecordingProxy"
 		      fork="true" dir="${repo.dir}" failonerror="true">
 			<classpath refid="classpath.run"/>
 			<arg value="--listen=${record.listen}"/>
 			<arg value="--target=${record.target}"/>
 			<arg value="--out=${record.out}"/>
+			<arg value="--redact=${record.redact}"/>
 		</java>
+	</target>
+
+	<property name="recorder.dir" location="${build.dir}/recorder"/>
+	<target name="recorder-jar" depends="compile-runner"
+	        description="Build crg-recorder.jar and its launch scripts in reliability/build/recorder/">
+		<delete dir="${recorder.dir}" quiet="true"/>
+		<mkdir dir="${recorder.dir}"/>
+		<!-- Jackson goes inside the jar, so the recorder is one file. Leave out module and multi-release metadata. -->
+		<unzip dest="${recorder.dir}/deps">
+			<fileset dir="${repo.dir}/lib/deps" includes="jackson-core-*.jar,jackson-jr-objects-*.jar"/>
+			<patternset excludes="module-info.class,META-INF/versions/**,META-INF/MANIFEST.MF,META-INF/*.SF,META-INF/*.RSA,META-INF/*.DSA"/>
+		</unzip>
+		<jar destfile="${recorder.dir}/crg-recorder.jar">
+			<fileset dir="${runner.classes}" includes="com/carolinarollergirls/scoreboard/reliability/capture/**,com/carolinarollergirls/scoreboard/reliability/harness/Trace*.class"/>
+			<fileset dir="${recorder.dir}/deps"/>
+			<manifest>
+				<attribute name="Main-Class" value="com.carolinarollergirls.scoreboard.reliability.capture.RecordingProxy"/>
+			</manifest>
+		</jar>
+		<copy todir="${recorder.dir}">
+			<fileset dir="tools/recorder" includes="record-game.*"/>
+		</copy>
+		<delete dir="${recorder.dir}/deps"/>
+		<copy file="RECORDING.md" todir="${recorder.dir}"/>
+		<chmod perm="755" dir="${recorder.dir}" includes="record-game.sh,record-game.command"/>
+		<echo message="Copy the files in ${recorder.dir} into the CRG folder (next to scoreboard.sh) on the scoreboard laptop."/>
 	</target>
 
 	<property name="trace" value=""/>

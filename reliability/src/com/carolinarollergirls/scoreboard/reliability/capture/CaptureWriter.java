@@ -30,7 +30,8 @@ import com.fasterxml.jackson.jr.ob.JSON;
  * </p>
  * <p>
  * Session cookies are never written. Each connection's device is named after the page that opened it ({@code sbo},
- * {@code standard}, {@code sbo-2} for a second SBO, or the same SBO reconnecting). HTTP requests are tied to a
+ * {@code standard}, {@code sbo-2} for a second SBO open at the same time); a device that reconnects to the same
+ * page continues as the same trace device. HTTP requests are tied to a
  * device by a hash of its cookie, salted with a value that is never written; the finished trace drops the hash.
  * </p>
  */
@@ -39,11 +40,15 @@ final class CaptureWriter {
     static final String DEVICES = "devices.json";
     static final String TRACE = "trace.crgtrace.jsonl";
     static final String SEED = "seed.json";
+    static final String CAPTURE_INFO = "capture.json";
 
-    CaptureWriter(File dir, Map<String, Object> headerExtras) throws IOException {
+    CaptureWriter(File dir, Map<String, Object> headerExtras, Redactor redactor) throws IOException {
         this.dir = dir;
+        this.redactor = redactor;
         this.headerExtras = headerExtras;
         new File(dir, "files").mkdirs();
+        // Kept so --assemble can rebuild the header after a crash.
+        JSON.std.with(JSON.Feature.PRETTY_PRINT_OUTPUT).write(headerExtras, new File(dir, CAPTURE_INFO));
         events = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(new File(dir, EVENTS), true),
                                                            StandardCharsets.UTF_8));
         salt = Long.toHexString(new java.security.SecureRandom().nextLong());
@@ -52,14 +57,25 @@ final class CaptureWriter {
 
     /** A new WebSocket connection: returns its trace device name and records the connect. */
     synchronized String connect(String cookie, String source, String platform) throws IOException {
+        // A device reconnecting (same cookie, same page) continues as the same trace device.
+        String id = cookieId(cookie);
+        for (Map.Entry<String, Map<String, Object>> e : devices.entrySet()) {
+            Map<String, Object> d = e.getValue();
+            if (id.equals(d.get("cookie")) && source.equals(d.get("source")) && !connected.contains(e.getKey())) {
+                connected.add(e.getKey());
+                event("connect", e.getKey(), new LinkedHashMap<>());
+                return e.getKey();
+            }
+        }
         String base = baseName(source);
         int n = nameCounts.merge(base, 1, Integer::sum);
         String name = n == 1 ? base : base + "-" + n;
         Map<String, Object> d = new LinkedHashMap<>();
         d.put("source", source);
         d.put("platform", platform == null ? "" : platform);
-        d.put("cookie", cookieId(cookie));
+        d.put("cookie", id);
         devices.put(name, d);
+        connected.add(name);
         writeDevices();
         event("connect", name, new LinkedHashMap<>());
         return name;
@@ -67,13 +83,14 @@ final class CaptureWriter {
 
     synchronized void send(String device, String text) throws IOException {
         Map<String, Object> f = new LinkedHashMap<>();
-        f.put("msg", text);
+        f.put("msg", redactor == null ? text : redactor.message(text));
         event("send", device, f);
     }
 
     synchronized void disconnect(String device, boolean clean) throws IOException {
         Map<String, Object> f = new LinkedHashMap<>();
         f.put("how", clean ? "close" : "drop");
+        connected.remove(device);
         event("disconnect", device, f);
     }
 
@@ -152,6 +169,8 @@ final class CaptureWriter {
     /** Builds {@code trace.crgtrace.jsonl} from a capture directory's devices, seed and events. */
     @SuppressWarnings("unchecked")
     static void assemble(File dir, Map<String, Object> headerExtras) throws IOException {
+        File info = new File(dir, CAPTURE_INFO);
+        if (headerExtras.isEmpty() && info.isFile()) { headerExtras = JSON.std.mapFrom(info); }
         Map<String, Object> devs = new LinkedHashMap<>();
         File df = new File(dir, DEVICES);
         if (df.isFile()) {
@@ -170,7 +189,7 @@ final class CaptureWriter {
         header.put("seed", seed);
         header.put("devices", devs);
         header.put("vars", new LinkedHashMap<>());
-        header.put("redacted", false);
+        header.put("redacted", Boolean.TRUE.equals(headerExtras.get("redacted")));
         header.put("notes", headerExtras.getOrDefault("notes", "Captured by RecordingProxy"));
         List<String> lines = new ArrayList<>();
         lines.add(JSON.std.asString(header));
@@ -218,6 +237,8 @@ final class CaptureWriter {
     private final long start;
     private final Map<String, Map<String, Object>> devices = new LinkedHashMap<>();
     private final Map<String, Integer> nameCounts = new HashMap<>();
+    private final java.util.Set<String> connected = new java.util.HashSet<>();
+    private final Redactor redactor;
     private int httpDevices;
     private int fileCount;
     private int count;

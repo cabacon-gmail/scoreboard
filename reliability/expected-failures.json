@@ -42,6 +42,13 @@
       "kind": "rate",
       "baselineRate": 0.45,
       "notes": "Trigger: natural (clients connecting and disconnecting while the scoreboard changes, as tablets do on venue Wi-Fi). Rate depends on the machine; baseline measured on Linux (0.42-0.53 over four runs of 200 iterations)."
+    },
+    {
+      "test": "com.carolinarollergirls.scoreboard.reliability.protocol.ConcurrentButtonsReliabilityTest#lateSecondTimeoutPressDoesNotStartAnotherTimeout",
+      "finding": "F6",
+      "kind": "single",
+      "messagePattern": "F6: a Timeout press from another device 1.2 s later started a second timeout",
+      "notes": "Trigger: natural (SBO and JT both react to one timeout whistle; the JT's press arrives 1.2 s after the SBO's). Phase 2 pilot. A fix needs commands to carry the state the operator saw, since a deliberate re-timeout looks the same on arrival."
     }
   ]
 }

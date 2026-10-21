@@ -96,6 +96,30 @@ It never edits tracked files. Every scenario uses temporary manifests and the fi
 
 A check is skipped rather than failed when it can't run. That happens for M12 with `-Dverify.skip.roottests=true`, for M13 when the base ref isn't fetched, and for P3 if `GameImpl.java` has changed so the simulated fix no longer applies.
 
+## Protocol harness (Phase 2)
+
+Tests under `reliability/tests/.../reliability/protocol/` drive the **packaged server** (`lib/crg-scoreboard.jar`) the way a crew's devices do, over `/WS/`. Design: [Phase 2](https://github.com/cabacon-gmail/crg-reliability-plan/blob/main/docs/phase2-protocol-harness.md).
+
+- **Everything is a trace.** A test builds a trace with the `Bout` DSL, or reads a `.crgtrace.jsonl` file, and `Replayer` plays it. Tests save their trace in their work dir (e.g. `reliability/build/work/<Class>/f6-pilot.crgtrace.jsonl`), so any run can be replayed exactly.
+- **`ServerLauncher`** starts the jar in a fresh directory on a free port, with an optional seed autosave. Stopping always kills the process tree, also from a shutdown hook.
+- **`DeviceClient`** is one device: its own session cookie, a WebSocket, and a mirror of the state it subscribed to. Every device connects through its own **`FaultProxy`**. Phase 2 uses only pass-through, cut and drop.
+- **The observer** registers everything and connects directly. It is the ground truth for `expect` lines and for oracles.
+
+```java
+Trace t = Bout.create("what this scenario is")
+    .device("sbo", "/nso/sbo?game=$GAME")
+    .at(0).on("sbo").connect().register("ScoreBoard.Game($GAME)")
+    .at(1500).on("sbo").startJam()
+    .after(100).expect(2000, "ScoreBoard.Game($GAME).InJam", true)
+    .build();
+try (ServerLauncher server = ServerLauncher.start(ServerLauncher.repoDirFromRunner(), new File("server"))) {
+    Replayer.Result r = Replayer.replay(t, server);
+    // r.failures, r.state(), r.devices, r.vars.get("GAME")
+}
+```
+
+`$GAME` is the current game's ID, resolved at replay. Wrap DSL chains in `// clang-format off` / `// clang-format on` so they read as a timeline.
+
 ## How expected failures work
 
 Every test asserts the correct behaviour, so a test for an open issue fails. `expected-failures.json` lists those tests:

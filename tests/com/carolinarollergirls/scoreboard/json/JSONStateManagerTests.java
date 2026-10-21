@@ -132,4 +132,48 @@ public class JSONStateManagerTests {
         assertEquals(hm, listener.state.getAll(false));
         assertEquals(1, listener.changed.size());
     }
+
+    /** Applies what it is sent the way a WebSocket client does: the first call is the full state, then changes. */
+    public class MirrorListener implements JSONStateListener {
+        public final java.util.Map<String, Object> mirror = new java.util.concurrent.ConcurrentHashMap<>();
+
+        @Override
+        public void sendUpdates(StateTrie state, StateTrie changed) {
+            mirror.putAll(changed.getAll(false));
+        }
+    }
+
+    @Test
+    public void listeners_can_connect_and_disconnect_during_updates() throws Exception {
+        final java.util.concurrent.atomic.AtomicBoolean done = new java.util.concurrent.atomic.AtomicBoolean();
+        final java.util.List<MirrorListener> stayed = new java.util.concurrent.CopyOnWriteArrayList<>();
+        Thread[] churn = new Thread[4];
+        for (int t = 0; t < churn.length; t++) {
+            churn[t] = new Thread() {
+                @Override
+                public void run() {
+                    while (!done.get()) {
+                        MirrorListener l = new MirrorListener();
+                        jsm.register(l);
+                        if (stayed.size() < 50) {
+                            stayed.add(l);
+                        } else {
+                            jsm.unregister(l);
+                        }
+                    }
+                }
+            };
+            churn[t].start();
+        }
+        try {
+            for (int i = 0; i < 3000; i++) { jsm.updateState("key" + (i % 20), i); }
+        } finally {
+            done.set(true);
+            for (Thread t : churn) { t.join(); }
+        }
+        jsm.waitForSent();
+        // Every listener that stayed must end up with exactly the manager's state: no update lost or overtaken by
+        // the snapshot it got when it connected.
+        for (MirrorListener l : stayed) { assertEquals(jsm.getState(), l.mirror); }
+    }
 }

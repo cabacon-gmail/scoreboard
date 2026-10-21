@@ -171,6 +171,19 @@ public final class ServerLauncher implements AutoCloseable {
         } catch (IOException e) { return false; }
     }
 
+    /** The server's wall clock, from the HTTP Date header (whole seconds), in ms since the epoch. */
+    public long serverWallMillis() throws IOException {
+        HttpURLConnection c = (HttpURLConnection) new URL(baseUrl() + "/urls/").openConnection();
+        c.setConnectTimeout(2000);
+        c.setReadTimeout(5000);
+        try {
+            c.getResponseCode();
+            long d = c.getDate();
+            if (d == 0) { throw new IOException("server sent no Date header"); }
+            return d;
+        } finally { c.disconnect(); }
+    }
+
     /** The tail of the server log, for failure messages. */
     public String logTail(int lines) {
         try {

@@ -1,0 +1,15 @@
+{
+  "profile": "default",
+  "notes": "The nine-device venue crew from the reliability plan. Edit this file, then run tools/harvest-crew.js to regenerate default.json.",
+  "devices": {
+    "sbo":     {"source": "/nso/sbo?game=$GAME", "role": "Scoreboard operator"},
+    "jt":      {"source": "/nso/jt?", "role": "Jam timer (mobile)"},
+    "sk1":     {"source": "/nso/sk?team=1&game=$GAME", "role": "Scorekeeper, team 1"},
+    "sk2":     {"source": "/nso/sk?team=2&game=$GAME", "role": "Scorekeeper, team 2"},
+    "pt":      {"source": "/nso/plt?pos=pt&team=both&game=$GAME", "role": "Penalty tracker"},
+    "lt":      {"source": "/nso/plt?pos=lt&game=$GAME", "role": "Lineup tracker"},
+    "pbt":     {"source": "/nso/pbt?", "role": "Penalty box timer"},
+    "display": {"source": "/views/standard", "role": "Main display"},
+    "overlay": {"source": "/views/overlay", "role": "Video overlay"}
+  }
+}

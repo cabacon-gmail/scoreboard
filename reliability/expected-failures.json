@@ -49,6 +49,48 @@
       "kind": "single",
       "messagePattern": "F6: a Timeout press from another device 1.2 s later started a second timeout",
       "notes": "Trigger: natural (SBO and JT both react to one timeout whistle; the JT's press arrives 1.2 s after the SBO's). Phase 2 pilot. A fix needs commands to carry the state the operator saw, since a deliberate re-timeout looks the same on arrival."
+    },
+    {
+      "test": "com.carolinarollergirls.scoreboard.reliability.protocol.ConcurrentButtonsReliabilityTest#stopFromAnotherDeviceDoesNotDeleteATimeout",
+      "finding": "F6",
+      "kind": "single",
+      "messagePattern": "F6: a Stop press from another device 600 ms after a Timeout press deleted the timeout",
+      "notes": "Trigger: natural (the SBO calls a timeout during a jam; the JT, who saw the jam end, presses Stop 600 ms later). Different buttons within 1 s are treated as one operator correcting a mistake, so the timeout is undone."
+    },
+    {
+      "test": "com.carolinarollergirls.scoreboard.reliability.protocol.DuplicateDeliveryReliabilityTest#aRepeatedPlusOneIsAppliedOnce",
+      "finding": "F10",
+      "kind": "single",
+      "messagePattern": "F10: a repeated \\+1 trip point frame was applied twice",
+      "notes": "Trigger: injected (a retry delivers the same frame twice). Needs request IDs, or equivalent, in the protocol."
+    },
+    {
+      "test": "com.carolinarollergirls.scoreboard.reliability.protocol.ReconnectStormReliabilityTest#devicesReconnectingTogetherAreAllAccepted",
+      "finding": "F14",
+      "kind": "rate",
+      "baselineRate": 0.72,
+      "notes": "Trigger: natural (ten devices reconnect at once, as when venue Wi-Fi comes back). Over-the-wire view of the Phase 1 fan-out race: the ConcurrentModificationException refuses WebSocket handshakes. Baseline measured on Linux (50 rounds of 10)."
+    },
+    {
+      "test": "com.carolinarollergirls.scoreboard.reliability.protocol.UploadPathReliabilityTest#uploadedFileNameCannotEscapeTheMediaFolder",
+      "finding": "F17",
+      "kind": "single",
+      "messagePattern": "F17: an uploaded plain file was written outside the media folder",
+      "notes": "Trigger: injected (a hostile upload from a device with write access). validFileName uses String.matches, which never matches a name containing ../"
+    },
+    {
+      "test": "com.carolinarollergirls.scoreboard.reliability.protocol.UploadPathReliabilityTest#zipEntryNameCannotEscapeTheMediaFolder",
+      "finding": "F17",
+      "kind": "single",
+      "messagePattern": "F17: an uploaded zip file was written outside the media folder",
+      "notes": "Trigger: injected (a zip whose entry name climbs out of the media folder: zip slip)."
+    },
+    {
+      "test": "com.carolinarollergirls.scoreboard.reliability.clock.WallClockStepReliabilityTest#gameClocksIgnoreWallClockSteps",
+      "finding": "F1",
+      "kind": "single",
+      "messagePattern": "F1: a wall-clock step of \\+5 min then -5 min moved the game clocks",
+      "notes": "Trigger: natural (NTP correcting the laptop's clock, or someone fixing it, during a jam). Needs libfaketime (Linux, macOS) or -Dreliability.allowClockChanges=true (Windows); SKIPPED otherwise."
     }
   ]
 }

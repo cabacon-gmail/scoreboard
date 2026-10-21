@@ -97,6 +97,8 @@ public final class SelfCheck {
     private final File workRoot;
     private final String baseRef;
     private final String rootBuild;
+    /** -Dverify.quick=true: M1 leaves out @Slow classes (whole bouts), saving about 20 minutes. */
+    private final boolean quick;
     private final List<CheckResult> results = new ArrayList<>();
 
     SelfCheck(Map<String, String> opts) {
@@ -108,6 +110,7 @@ public final class SelfCheck {
         workRoot = new File(opts.get("--work-root")).getAbsoluteFile();
         baseRef = opts.containsKey("--base-ref") ? opts.get("--base-ref") : "origin/dev";
         rootBuild = opts.containsKey("--root-build") ? opts.get("--root-build") : "skipped";
+        quick = Boolean.parseBoolean(opts.getOrDefault("--quick", "false"));
     }
 
     public static void main(String[] args) {
@@ -138,7 +141,7 @@ public final class SelfCheck {
 
         // M1-M3: the real suite with the real manifest.
         List<String> htmlBefore = listTree(new File(repoDir, "html"));
-        SuiteRun m1 = run("m1-real-suite", realManifest, testClasses, null);
+        SuiteRun m1 = run("m1-real-suite", realManifest, testClasses, null, "--quick", String.valueOf(quick));
         List<String> htmlAfter = listTree(new File(repoDir, "html"));
         checkM1(m1, manifestJson);
         checkM2(m1);
@@ -748,7 +751,8 @@ public final class SelfCheck {
         dir.mkdirs();
         File out = new File(dir, "runner-output.txt");
         Process proc = new ProcessBuilder(cmd).directory(repoDir).redirectErrorStream(true).redirectOutput(out).start();
-        if (!proc.waitFor(15, TimeUnit.MINUTES)) {
+        if (!proc.waitFor(60, TimeUnit.MINUTES)) {
+            proc.descendants().forEach(ProcessHandle::destroyForcibly); // class JVMs and their servers
             proc.destroyForcibly();
             r.exit = -1;
         } else {

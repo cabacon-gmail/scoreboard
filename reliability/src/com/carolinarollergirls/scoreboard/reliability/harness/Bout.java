@@ -40,6 +40,28 @@ public final class Bout {
         return this;
     }
 
+    /** Declares every device of {@code crew}. Use {@link #connectCrew} to connect them. */
+    public Bout crew(CrewProfile crew) {
+        this.crew = crew;
+        for (CrewProfile.Device d : crew.devices().values()) { device(d.name, d.source); }
+        return this;
+    }
+
+    /**
+     * Connects every crew device, {@code spacingMs} apart, each registering the paths its real screen registers.
+     * Leaves the current time after the last one.
+     */
+    public Bout connectCrew(long spacingMs) {
+        if (crew == null) { throw new IllegalStateException("call crew(profile) first"); }
+        boolean first = true;
+        for (CrewProfile.Device d : crew.devices().values()) {
+            if (!first) { after(spacingMs); }
+            first = false;
+            on(d.name).connect().send(Messages.register(d.paths));
+        }
+        return this;
+    }
+
     public Bout var(String name, String value) {
         vars.put(name, value);
         return this;
@@ -53,9 +75,12 @@ public final class Bout {
         return this;
     }
 
-    /** Sets the current time (ms since the trace started). */
+    /**
+     * Sets the current time (ms since the trace started). Going back is allowed, so a test can add events to a
+     * finished bout (a stall, a kill); {@link #build} orders events by time, keeping call order for equal times.
+     */
     public Bout at(long t) {
-        if (t < now) { throw new IllegalArgumentException("time goes backwards: " + t + " < " + now); }
+        if (t < 0) { throw new IllegalArgumentException("negative time: " + t); }
         now = t;
         return this;
     }
@@ -86,6 +111,38 @@ public final class Bout {
     /** Stops reading for {@code ms}, so the server's sends to this device back up. */
     public Bout stall(long ms) { return dev("stall", map("ms", ms)); }
 
+    /** {@code WS.Set(key, value, flag)}, e.g. flag {@code "change"} for the +1 / -1 buttons. */
+    public Bout set(String key, Object value, String flag) { return send(Messages.set(key, value, flag)); }
+
+    /** An HTTP request with this device's cookie. {@code files}: maps with field, name and text/base64/from. */
+    public Bout http(String method, String path, Map<String, Object> form, List<Map<String, Object>> files) {
+        Map<String, Object> f = map("method", method, "path", path);
+        if (form != null && !form.isEmpty()) { f.put("form", form); }
+        if (files != null && !files.isEmpty()) { f.put("files", files); }
+        return dev("http", f);
+    }
+
+    /** One file part for {@link #http}, with inline text content. */
+    public static Map<String, Object> textFile(String field, String name, String text) {
+        return map("field", field, "name", name, "text", text);
+    }
+
+    /** One file part for {@link #http}, with binary content. */
+    public static Map<String, Object> binaryFile(String field, String name, byte[] content) {
+        return map("field", field, "name", name, "base64", java.util.Base64.getEncoder().encodeToString(content));
+    }
+
+    /** One file part for {@link #http}, read from {@code path} (relative to the trace's directory) at replay. */
+    public static Map<String, Object> fileFrom(String field, String name, String path) {
+        return map("field", field, "name", name, "from", path);
+    }
+
+    /** Steps the server's wall clock by {@code ms} (whole seconds; negative steps back). Needs a ClockControl. */
+    public Bout clock(long ms) {
+        events.add(new Trace.Event(now, "clock", null, map("step", ms), 0));
+        return this;
+    }
+
     // Buttons, as the SBO and JT screens send them.
     public Bout startJam() { return set("ScoreBoard.Game($GAME).StartJam", true); }
     /** The "Stop Jam / End Timeout / Lineup" button. */
@@ -94,6 +151,8 @@ public final class Bout {
     public Bout officialTimeout() { return set("ScoreBoard.Game($GAME).OfficialTimeout", true); }
     /** Assigns the running timeout to team 1 or 2 (or starts one), as the team Timeout button does. */
     public Bout teamTimeout(int team) { return set("ScoreBoard.Game($GAME).Team(" + team + ").Timeout", true); }
+    /** The SK screen's "Trip Pts +1" button: a relative change. */
+    public Bout tripScoreUp(int team) { return set("ScoreBoard.Game($GAME).Team(" + team + ").TripScore", 1, "change"); }
     public Bout clockUndo() { return set("ScoreBoard.Game($GAME).ClockUndo", true); }
 
     /** Within {@code withinMs}, the observer's state must have {@code key} = {@code value} (null = absent). */
@@ -120,7 +179,14 @@ public final class Bout {
     }
 
     public Trace build() {
-        Trace t = new Trace(header, events);
+        List<Trace.Event> ordered = new ArrayList<>(events);
+        ordered.sort((a, b) -> Long.compare(a.t, b.t)); // stable: equal times keep call order
+        // Number events as they will appear in the written file (the header is line 1), so failures name the line.
+        for (int i = 0; i < ordered.size(); i++) {
+            Trace.Event e = ordered.get(i);
+            ordered.set(i, new Trace.Event(e.t, e.ev, e.dev, e.fields, i + 2));
+        }
+        Trace t = new Trace(header, ordered);
         try {
             TraceReader.validate(t);
         } catch (TraceFormatException e) { throw new IllegalStateException(e.getMessage(), e); }
@@ -133,7 +199,7 @@ public final class Bout {
         return this;
     }
 
-    private static Map<String, Object> map(Object... kv) {
+    static Map<String, Object> map(Object... kv) {
         Map<String, Object> m = new LinkedHashMap<>();
         for (int i = 0; i + 1 < kv.length; i += 2) { m.put((String) kv[i], kv[i + 1]); }
         return m;
@@ -145,4 +211,5 @@ public final class Bout {
     private final List<Trace.Event> events = new ArrayList<>();
     private long now;
     private String current;
+    private CrewProfile crew;
 }

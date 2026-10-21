@@ -37,13 +37,6 @@
       "notes": "Trigger: injected (the newest autosave holds a value this version cannot parse, e.g. written by a newer version or damaged). Entries that exist only in the rejected file survive the fallback. Expectation is provisional pending the autosave-semantics decision."
     },
     {
-      "test": "com.carolinarollergirls.scoreboard.json.FanOutReliabilityTest#updatesSurviveClientsConnectingAndDisconnecting",
-      "finding": "F14",
-      "kind": "rate",
-      "baselineRate": 0.45,
-      "notes": "Trigger: natural (clients connecting and disconnecting while the scoreboard changes, as tablets do on venue Wi-Fi). Rate depends on the machine; baseline measured on Linux (0.42-0.53 over four runs of 200 iterations)."
-    },
-    {
       "test": "com.carolinarollergirls.scoreboard.reliability.protocol.ConcurrentButtonsReliabilityTest#lateSecondTimeoutPressDoesNotStartAnotherTimeout",
       "finding": "F6",
       "kind": "single",
@@ -63,27 +56,6 @@
       "kind": "single",
       "messagePattern": "F10: a repeated \\+1 trip point frame was applied twice",
       "notes": "Trigger: injected (a retry delivers the same frame twice). Needs request IDs, or equivalent, in the protocol."
-    },
-    {
-      "test": "com.carolinarollergirls.scoreboard.reliability.protocol.ReconnectStormReliabilityTest#devicesReconnectingTogetherAreAllAccepted",
-      "finding": "F14",
-      "kind": "rate",
-      "baselineRate": 0.72,
-      "notes": "Trigger: natural (ten devices reconnect at once, as when venue Wi-Fi comes back). Over-the-wire view of the Phase 1 fan-out race: the ConcurrentModificationException refuses WebSocket handshakes. Baseline measured on Linux (50 rounds of 10)."
-    },
-    {
-      "test": "com.carolinarollergirls.scoreboard.reliability.protocol.UploadPathReliabilityTest#uploadedFileNameCannotEscapeTheMediaFolder",
-      "finding": "F17",
-      "kind": "single",
-      "messagePattern": "F17: an uploaded plain file was written outside the media folder",
-      "notes": "Trigger: injected (a hostile upload from a device with write access). validFileName uses String.matches, which never matches a name containing ../"
-    },
-    {
-      "test": "com.carolinarollergirls.scoreboard.reliability.protocol.UploadPathReliabilityTest#zipEntryNameCannotEscapeTheMediaFolder",
-      "finding": "F17",
-      "kind": "single",
-      "messagePattern": "F17: an uploaded zip file was written outside the media folder",
-      "notes": "Trigger: injected (a zip whose entry name climbs out of the media folder: zip slip)."
     },
     {
       "test": "com.carolinarollergirls.scoreboard.reliability.clock.WallClockStepReliabilityTest#gameClocksIgnoreWallClockSteps",

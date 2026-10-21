@@ -43,6 +43,37 @@ public final class DeviceClient implements AutoCloseable {
         public final String text;
     }
 
+    /** One file part of a multipart upload. */
+    public static final class Upload {
+        public Upload(String field, String filename, byte[] content) {
+            this.field = field;
+            this.filename = filename;
+            this.content = content;
+        }
+
+        public final String field;
+        public final String filename;
+        public final byte[] content;
+    }
+
+    /** The outcome of an HTTP request. */
+    public static final class HttpResult {
+        HttpResult(int status, String body, Map<String, List<String>> headers) {
+            this.status = status;
+            this.body = body;
+            this.headers = headers;
+        }
+
+        @Override
+        public String toString() {
+            return status + " " + (body.length() > 200 ? body.substring(0, 200) + "..." : body);
+        }
+
+        public final int status;
+        public final String body;
+        public final Map<String, List<String>> headers;
+    }
+
     public DeviceClient(String name, int serverPort, String source, String platform) {
         this.name = name;
         this.serverPort = serverPort;
@@ -67,11 +98,69 @@ public final class DeviceClient implements AutoCloseable {
         connected = true;
     }
 
+    /** Gets this device's session cookie now, if it has none yet. */
+    public synchronized void ensureCookie() throws IOException {
+        if (cookie == null) { cookie = fetchCookie(); }
+    }
+
+    /**
+     * An HTTP request to the server (not through the proxy), carrying this device's cookie. With {@code form} or
+     * {@code files}, the body is {@code multipart/form-data}, as the browser's upload forms send it.
+     */
+    public HttpResult http(String method, String path, Map<String, String> form, List<Upload> files)
+        throws IOException {
+        ensureCookie();
+        HttpRequest.Builder b = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + path))
+                                    .timeout(Duration.ofSeconds(60))
+                                    .header("Cookie", cookie);
+        boolean multipart = (form != null && !form.isEmpty()) || (files != null && !files.isEmpty());
+        if (multipart) {
+            String boundary = "----crgReliability" + Long.toHexString(System.nanoTime());
+            b.header("Content-Type", "multipart/form-data; boundary=" + boundary);
+            b.method(method, HttpRequest.BodyPublishers.ofByteArray(multipartBody(boundary, form, files)));
+        } else {
+            b.method(method, HttpRequest.BodyPublishers.noBody());
+        }
+        try {
+            HttpResponse<byte[]> r = http.send(b.build(), HttpResponse.BodyHandlers.ofByteArray());
+            return new HttpResult(r.statusCode(), new String(r.body(), StandardCharsets.UTF_8), r.headers().map());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException(name + ": interrupted during " + method + " " + path);
+        }
+    }
+
+    static byte[] multipartBody(String boundary, Map<String, String> form, List<Upload> files) {
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        try {
+            if (form != null) {
+                for (Map.Entry<String, String> f : form.entrySet()) {
+                    out.write(("--" + boundary + "\r\nContent-Disposition: form-data; name=\"" + f.getKey() +
+                               "\"\r\n\r\n" + f.getValue() + "\r\n")
+                                  .getBytes(StandardCharsets.UTF_8));
+                }
+            }
+            if (files != null) {
+                for (Upload u : files) {
+                    out.write(("--" + boundary + "\r\nContent-Disposition: form-data; name=\"" + u.field +
+                               "\"; filename=\"" + u.filename +
+                               "\"\r\nContent-Type: application/octet-stream\r\n\r\n")
+                                  .getBytes(StandardCharsets.UTF_8));
+                    out.write(u.content);
+                    out.write("\r\n".getBytes(StandardCharsets.UTF_8));
+                }
+            }
+            out.write(("--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
+        } catch (IOException e) { throw new IllegalStateException(e); }
+        return out.toByteArray();
+    }
+
     /** Sends one text frame exactly as given. */
     public void send(String text) throws IOException {
         WebSocket w = ws;
         if (w == null || !connected) { throw new IOException(name + ": not connected"); }
         frames.add(new Frame(System.nanoTime(), true, text));
+        noteRegister(text);
         try {
             w.sendText(text, true).get(10, TimeUnit.SECONDS);
         } catch (Exception e) { throw new IOException(name + ": send failed: " + e, e); }
@@ -81,6 +170,25 @@ public final class DeviceClient implements AutoCloseable {
     public void set(String key, Object value) throws IOException { send(Messages.set(key, value)); }
 
     public void register(String... paths) throws IOException { send(Messages.register(paths)); }
+
+    /** The paths this device has registered so far (from the Register frames it sent). */
+    public RegisteredPaths registeredPaths() { return registered; }
+
+    @SuppressWarnings("unchecked")
+    private void noteRegister(String text) {
+        if (!text.contains("\"Register\"")) { return; }
+        try {
+            Object parsed = JSON.std.anyFrom(text);
+            if (parsed instanceof Map && "Register".equals(((Map<String, Object>) parsed).get("action"))) {
+                Object paths = ((Map<String, Object>) parsed).get("paths");
+                if (paths instanceof List) {
+                    for (Object p : (List<Object>) paths) { registered.add(String.valueOf(p)); }
+                }
+            }
+        } catch (IOException e) {
+            // Not JSON: the server will reject it too.
+        }
+    }
 
     /** Closes cleanly with a WebSocket close frame. */
     public void disconnect() {
@@ -231,6 +339,7 @@ public final class DeviceClient implements AutoCloseable {
     private final String platform;
     private final HttpClient http;
     private final Map<String, Object> state = new LinkedHashMap<>();
+    private final RegisteredPaths registered = new RegisteredPaths();
     private final List<Frame> frames = Collections.synchronizedList(new ArrayList<>());
     private final List<String> errors = new ArrayList<>();
     private volatile WebSocket ws;

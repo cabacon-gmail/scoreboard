@@ -18,9 +18,11 @@
 	<property name="report.dir" location="${build.dir}/report"/>
 	<property name="work.dir" location="${build.dir}/work"/>
 	<property name="manifest.file" location="expected-failures.json"/>
-	<property name="class.timeout.seconds" value="600"/>
+	<property name="class.timeout.seconds" value="1500"/>
 	<property name="rate.scale" value="1.0"/>
 	<property name="only" value=""/>
+	<!-- -Dquick=true leaves out @Slow classes (whole bouts); verify always runs everything. -->
+	<property name="quick" value="false"/>
 
 	<property name="runner.classes" location="${build.dir}/runner-classes"/>
 	<property name="test.classes" location="${build.dir}/test-classes"/>
@@ -76,6 +78,8 @@
 		<java classname="com.carolinarollergirls.scoreboard.reliability.runner.ReliabilityMain"
 		      fork="true" dir="${repo.dir}" failonerror="false" resultproperty="runner.exit">
 			<classpath refid="classpath.run"/>
+			<!-- -Dreliability.<option>=... on the ant command line reaches every test JVM. -->
+			<syspropertyset><propertyref prefix="reliability."/></syspropertyset>
 			<arg value="--manifest"/><arg value="${manifest.file}"/>
 			<arg value="--test-classes"/><arg value="${test.classes}"/>
 			<arg value="--report-dir"/><arg value="${report.dir}"/>
@@ -85,6 +89,7 @@
 			<arg value="--class-timeout"/><arg value="${class.timeout.seconds}"/>
 			<arg value="--rate-scale"/><arg value="${rate.scale}"/>
 			<arg value="--only"/><arg value="${only}"/>
+			<arg value="--quick"/><arg value="${quick}"/>
 		</java>
 		<fail message="Reliability run found blocking verdicts (exit code 1). See ${report.dir}/summary.txt">
 			<condition><equals arg1="${runner.exit}" arg2="1"/></condition>
@@ -92,6 +97,15 @@
 		<fail message="Reliability runner infrastructure error (exit code ${runner.exit}).">
 			<condition><not><equals arg1="${runner.exit}" arg2="0"/></not></condition>
 		</fail>
+	</target>
+
+	<target name="seeds" depends="compile-runner"
+	        description="Regenerate the seed autosaves in reliability/seeds/ from a running server">
+		<java classname="com.carolinarollergirls.scoreboard.reliability.harness.SeedMaker"
+		      fork="true" dir="${repo.dir}" failonerror="true">
+			<classpath refid="classpath.run"/>
+			<arg value="${repo.dir}"/>
+		</java>
 	</target>
 
 	<!--
@@ -104,6 +118,8 @@
 	<property name="fixture.classes" location="${build.dir}/fixture-classes"/>
 	<property name="verify.dir" location="${build.dir}/verify"/>
 	<property name="verify.base.ref" value="origin/dev"/>
+	<!-- -Dverify.quick=true: M1 leaves out @Slow classes (the reference bout, F12, F15). -->
+	<property name="verify.quick" value="false"/>
 
 	<target name="compile-selfcheck" depends="compile-tests">
 		<delete dir="${selfcheck.classes}" quiet="true"/>
@@ -150,6 +166,7 @@
 			<arg value="--work-root"/><arg value="${verify.dir}"/>
 			<arg value="--base-ref"/><arg value="${verify.base.ref}"/>
 			<arg value="--root-build"/><arg value="${verify.root.status}"/>
+			<arg value="--quick"/><arg value="${verify.quick}"/>
 		</java>
 		<fail message="Verification failed. See ${verify.dir}/verify-summary.txt">
 			<condition><not><equals arg1="${verify.exit}" arg2="0"/></not></condition>

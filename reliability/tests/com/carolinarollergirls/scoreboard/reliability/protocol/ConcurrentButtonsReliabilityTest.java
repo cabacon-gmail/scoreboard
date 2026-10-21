@@ -57,11 +57,7 @@ public class ConcurrentButtonsReliabilityTest {
 
         String game = (String) r.vars.get("GAME");
         Map<String, Object> s = r.state();
-        TreeSet<String> timeouts = new TreeSet<>();
-        for (String k : s.keySet()) {
-            Matcher m = TIMEOUT_ID.matcher(k);
-            if (m.matches()) { timeouts.add(m.group(1)); }
-        }
+        TreeSet<String> timeouts = timeoutIds(s);
         Object current = s.get("ScoreBoard.Game(" + game + ").CurrentTimeout");
         Object owner = s.get("ScoreBoard.Game(" + game + ").Period(1).Timeout(" + current + ").Owner");
         boolean team1InTimeout = Boolean.TRUE.equals(s.get("ScoreBoard.Game(" + game + ").Team(1).InTimeout"));
@@ -72,5 +68,50 @@ public class ConcurrentButtonsReliabilityTest {
                      1, timeouts.size());
         assertTrue("F6: Team 1's timeout lost its owner after another device's Timeout press (owner '" + owner + "')",
                    String.valueOf(owner).endsWith("_1") && team1InTimeout);
+    }
+
+    /**
+     * F6, scenario 2 (probed on dev, Oct 20, 2026). The SBO calls a timeout during a jam; 600 ms later the JT, who
+     * saw the jam end, presses Stop. Different buttons within 1 s look like one operator correcting a mistake, so the
+     * server undoes the SBO's timeout and applies Stop instead: the timeout is gone, and a lineup runs.
+     */
+    @Test
+    public void stopFromAnotherDeviceDoesNotDeleteATimeout() throws Exception {
+        // clang-format off
+        Trace trace = Bout.create("F6 #2: SBO calls a timeout during a jam; JT presses Stop 600 ms later")
+            .device("sbo", "/nso/sbo?game=$GAME")
+            .device("jt", "/nso/jt?game=$GAME")
+            .at(0).on("sbo").connect().register("ScoreBoard.Game($GAME)")
+                  .on("jt").connect().register("ScoreBoard.Game($GAME)")
+            .at(1500).on("sbo").startJam()
+            .after(100).expect(2000, "ScoreBoard.Game($GAME).InJam", true)
+            .at(4000).mark("whistle: timeout").on("sbo").timeout()
+            .after(100).expect(1000, "ScoreBoard.Game($GAME).Clock(Timeout).Running", true)
+            .at(4600).on("jt").stopJam()
+            .at(6000).mark("end")
+            .build();
+        // clang-format on
+        TraceWriter.write(trace, new File("f6-replace.crgtrace.jsonl"));
+
+        Replayer.Result r;
+        try (ServerLauncher server = ServerLauncher.start(ServerLauncher.repoDirFromRunner(), new File("server2"))) {
+            r = Replayer.replay(trace, server);
+        }
+        assertTrue("setup: trace did not replay cleanly: " + r.failures, r.ok());
+        int timeouts = timeoutIds(r.state()).size();
+        String game = (String) r.vars.get("GAME");
+        Object inTimeout = r.state().get("ScoreBoard.Game(" + game + ").Clock(Timeout).Running");
+        assertEquals("F6: a Stop press from another device 600 ms after a Timeout press deleted the timeout (" +
+                         timeouts + " timeouts, timeout clock running=" + inTimeout + ")",
+                     1, timeouts);
+    }
+
+    private static TreeSet<String> timeoutIds(Map<String, Object> s) {
+        TreeSet<String> ids = new TreeSet<>();
+        for (String k : s.keySet()) {
+            Matcher m = TIMEOUT_ID.matcher(k);
+            if (m.matches()) { ids.add(m.group(1)); }
+        }
+        return ids;
     }
 }

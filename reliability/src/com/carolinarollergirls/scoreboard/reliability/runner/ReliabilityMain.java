@@ -45,9 +45,11 @@ public final class ReliabilityMain {
         File workDir;
         File repoDir = new File(".");
         String classpath;
-        int classTimeoutSeconds = 600;
+        int classTimeoutSeconds = 1500; // the slowest class, F15, plays two 6-minute bouts
         double rateScale = 1.0;
         Pattern only;
+        /** Leave out classes annotated {@code @Slow}, as if filtered out by --only. */
+        boolean quick;
         boolean inProcess;
     }
 
@@ -83,6 +85,14 @@ public final class ReliabilityMain {
             }
             classes = kept;
         }
+        if (o.quick) {
+            List<String> kept = new ArrayList<>();
+            for (String c : classes) {
+                if (!isSlow(c)) { kept.add(c); }
+            }
+            System.out.println("quick run: leaving out " + (classes.size() - kept.size()) + " @Slow classes");
+            classes = kept;
+        }
         if (classes.isEmpty()) {
             System.err.println("ERROR: no *ReliabilityTest classes found under " + o.testClasses.getPath() +
                                (o.only != null ? " matching --only " + o.only.pattern() : ""));
@@ -104,7 +114,8 @@ public final class ReliabilityMain {
                                              (System.currentTimeMillis() - classStart) / 1000.0));
         }
 
-        List<Evaluator.Outcome> outcomes = Evaluator.evaluate(results, manifest, classes, o.only != null);
+        List<Evaluator.Outcome> outcomes =
+            Evaluator.evaluate(results, manifest, classes, o.only != null || o.quick);
         Report.RunInfo info = runInfo(o.repoDir, start);
         Report.write(o.reportDir, outcomes, info);
         System.out.println();
@@ -135,6 +146,12 @@ public final class ReliabilityMain {
             cmd.add("-Dreliability.workDir=" + classWork.getAbsolutePath());
             cmd.add("-Dreliability.repoDir=" + o.repoDir.getAbsolutePath());
             cmd.add("-Dreliability.rateScale=" + o.rateScale);
+            // Test options such as reliability.statsbook and reliability.libfaketime pass straight through.
+            for (String name : System.getProperties().stringPropertyNames()) {
+                if (name.startsWith("reliability.") && !FIXED_PROPERTIES.contains(name)) {
+                    cmd.add("-D" + name + "=" + System.getProperty(name));
+                }
+            }
             cmd.add(ClassRunner.class.getName());
             cmd.add(className);
             cmd.add(partial.getAbsolutePath());
@@ -151,6 +168,7 @@ public final class ReliabilityMain {
                 finished = false;
             }
             if (!finished) {
+                p.descendants().forEach(ProcessHandle::destroyForcibly); // servers a test launched
                 p.destroyForcibly();
                 try {
                     p.waitFor(30, TimeUnit.SECONDS);
@@ -191,6 +209,10 @@ public final class ReliabilityMain {
     }
 
     /** Creates a fresh work directory holding a copy of the repo's config/ (without config/autosave/). */
+    /** Properties the runner sets itself for each class JVM. */
+    static final java.util.Set<String> FIXED_PROPERTIES = new java.util.HashSet<>(
+        java.util.Arrays.asList("reliability.workDir", "reliability.repoDir", "reliability.rateScale"));
+
     static void prepareWorkDir(File classWork, File repoDir) throws IOException {
         deleteRecursively(classWork.toPath());
         classWork.mkdirs();
@@ -213,6 +235,14 @@ public final class ReliabilityMain {
                 return FileVisitResult.CONTINUE;
             }
         });
+    }
+
+    /** True if the class carries {@code support.Slow}. Classes that can't be loaded here count as not slow. */
+    static boolean isSlow(String className) {
+        try {
+            Class<?> c = Class.forName(className, false, ReliabilityMain.class.getClassLoader());
+            return c.isAnnotationPresent(com.carolinarollergirls.scoreboard.reliability.support.Slow.class);
+        } catch (Throwable t) { return false; }
     }
 
     static List<String> discover(File testClasses) throws IOException {
@@ -316,6 +346,7 @@ public final class ReliabilityMain {
             case "--classpath": o.classpath = v; break;
             case "--class-timeout": o.classTimeoutSeconds = parseInt(a, v); break;
             case "--rate-scale": o.rateScale = parseDouble(a, v); break;
+            case "--quick": o.quick = Boolean.parseBoolean(v); break;
             case "--only":
                 if (!v.isEmpty()) {
                     try {
@@ -353,5 +384,5 @@ public final class ReliabilityMain {
     static final String USAGE =
         "usage: ReliabilityMain --manifest <file> --test-classes <dir> --report-dir <dir> --work-dir <dir>\n"
         + "         --classpath <cp> [--repo-dir <dir>] [--class-timeout <seconds>] [--rate-scale <n>]\n"
-        + "         [--only <regex>] [--in-process]";
+        + "         [--only <regex>] [--quick true|false] [--in-process]";
 }

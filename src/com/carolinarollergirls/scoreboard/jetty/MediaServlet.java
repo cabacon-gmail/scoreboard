@@ -150,6 +150,10 @@ public class MediaServlet extends HttpServlet {
 
     protected File createFile(File typeDir, FileItem item) throws IOException, FileNotFoundException {
         File f = new File(typeDir, item.getName());
+        // Belt and braces: whatever the name, the file must end up inside the media type's directory.
+        if (!f.getCanonicalFile().toPath().startsWith(typeDir.getCanonicalFile().toPath())) {
+            throw new IllegalArgumentException("Invalid file name '" + item.getName() + "'");
+        }
         f.getParentFile().mkdirs();
         FileOutputStream fos = null;
         InputStream is = item.getInputStream();
@@ -169,8 +173,11 @@ public class MediaServlet extends HttpServlet {
         ZipEntry zE;
         try {
             while (null != (zE = ziS.getNextEntry())) {
-                if (zE.isDirectory() || !scoreBoard.getMedia().validFileName(zE.getName())) { continue; }
-                FileItem item = factory.createItem(null, null, false, zE.getName());
+                // Zips made by "compress folder" put each file under the folder's name; use the file's own name.
+                String name =
+                    zE.getName().substring(Math.max(zE.getName().lastIndexOf('/'), zE.getName().lastIndexOf('\\')) + 1);
+                if (zE.isDirectory() || !scoreBoard.getMedia().validFileName(name)) { continue; }
+                FileItem item = factory.createItem(null, null, false, name);
                 OutputStream oS = item.getOutputStream();
                 IOUtils.copyLarge(ziS, oS);
                 oS.close();

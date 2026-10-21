@@ -1,6 +1,7 @@
 package com.carolinarollergirls.scoreboard.core.admin;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
@@ -66,6 +67,21 @@ public class MediaImplTests {
     @After
     public void tearDown() throws Exception {
         BasePath.set(oldDir);
+    }
+
+    @Test
+    public void testValidFileName() {
+        assertTrue(media.validFileName("logo.png"));
+        assertTrue(media.validFileName("team logo (2).png"));
+        assertTrue(media.validFileName("my.team.png"));
+        assertFalse(media.validFileName(".hidden.png"));
+        assertFalse(media.validFileName("Thumbs.db"));
+        assertFalse(media.validFileName("../../config/autosave/x.json"));
+        assertFalse(media.validFileName("sub/logo.png"));
+        assertFalse(media.validFileName("..\\..\\config\\x.json"));
+        assertFalse(media.validFileName("C:\\Users\\me\\logo.png"));
+        assertFalse(media.validFileName(""));
+        assertFalse(media.validFileName(null));
     }
 
     @Test

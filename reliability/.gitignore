@@ -1,1 +1,3 @@
 /build/
+# Recordings from real games can hold names: keep them out of git.
+/captures/

@@ -99,6 +99,37 @@
 		</fail>
 	</target>
 
+	<!--
+	    Recording proxy for real games: start CRG on a local-only port first, e.g.
+	        java -jar lib/crg-scoreboard.jar -p=8001 -h=127.0.0.1
+	    then
+	        ant -f reliability/build.xml record [-Drecord.listen=8000] [-Drecord.target=127.0.0.1:8001] [-Drecord.out=dir]
+	    Ctrl-C stops it and writes the trace.
+	-->
+	<property name="record.listen" value="8000"/>
+	<property name="record.target" value="127.0.0.1:8001"/>
+	<property name="record.out" value=""/>
+	<target name="record" depends="compile-runner" description="Run the recording proxy in front of CRG">
+		<java classname="com.carolinarollergirls.scoreboard.reliability.capture.RecordingProxy"
+		      fork="true" dir="${repo.dir}" failonerror="true">
+			<classpath refid="classpath.run"/>
+			<arg value="--listen=${record.listen}"/>
+			<arg value="--target=${record.target}"/>
+			<arg value="--out=${record.out}"/>
+		</java>
+	</target>
+
+	<property name="trace" value=""/>
+	<target name="replay" depends="compile-runner" description="Replay one trace: -Dtrace=path/to/trace.crgtrace.jsonl">
+		<fail message="Give the trace: -Dtrace=path/to/trace.crgtrace.jsonl"><condition><equals arg1="${trace}" arg2=""/></condition></fail>
+		<java classname="com.carolinarollergirls.scoreboard.reliability.harness.ReplayMain"
+		      fork="true" dir="${repo.dir}" failonerror="true">
+			<classpath refid="classpath.run"/>
+			<arg value="${repo.dir}"/>
+			<arg file="${trace}"/>
+		</java>
+	</target>
+
 	<target name="seeds" depends="compile-runner"
 	        description="Regenerate the seed autosaves in reliability/seeds/ from a running server">
 		<java classname="com.carolinarollergirls.scoreboard.reliability.harness.SeedMaker"

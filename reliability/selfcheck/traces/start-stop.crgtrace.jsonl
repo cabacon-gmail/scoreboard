@@ -1,0 +1,11 @@
+{"trace":1,"origin":"synthetic","devices":{"sbo":{"source":"/nso/sbo?game=$GAME","platform":"trace"},"jt":{"source":"/nso/jt?game=$GAME","platform":"trace"}},"vars":{},"redacted":false,"notes":"verify H3/H4: start and stop a jam from two devices"}
+{"t":0,"ev":"connect","dev":"sbo"}
+{"t":0,"ev":"send","dev":"sbo","msg":{"action":"Register","paths":["ScoreBoard.Game($GAME)"]}}
+{"t":0,"ev":"connect","dev":"jt"}
+{"t":0,"ev":"send","dev":"jt","msg":"{\"action\":\"Register\",\"paths\":[\"ScoreBoard.Game($GAME).InJam\"]}"}
+{"t":1500,"ev":"send","dev":"sbo","msg":{"action":"Set","key":"ScoreBoard.Game($GAME).StartJam","value":true,"flag":""}}
+{"t":1600,"ev":"expect","within":2000,"state":{"ScoreBoard.Game($GAME).InJam":true}}
+{"t":1600,"ev":"expect","dev":"jt","within":2000,"state":{"ScoreBoard.Game($GAME).InJam":true}}
+{"t":3000,"ev":"send","dev":"jt","msg":{"action":"Set","key":"ScoreBoard.Game($GAME).StopJam","value":true,"flag":""}}
+{"t":3100,"ev":"expect","within":2000,"state":{"ScoreBoard.Game($GAME).InJam":false}}
+{"t":3100,"ev":"expect","dev":"sbo","within":2000,"state":{"ScoreBoard.Game($GAME).InJam":false}}

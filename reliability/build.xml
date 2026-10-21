@@ -50,7 +50,7 @@
 	<target name="compile-runner" depends="product">
 		<delete dir="${runner.classes}" quiet="true"/>
 		<mkdir dir="${runner.classes}"/>
-		<javac srcdir="src" destdir="${runner.classes}" source="1.8" target="1.8"
+		<javac srcdir="src" destdir="${runner.classes}" release="11"
 		       includeantruntime="false" debug="true" encoding="UTF-8">
 			<compilerarg value="-Xlint:all"/>
 			<compilerarg value="-Xlint:-serial"/>
@@ -62,7 +62,7 @@
 	<target name="compile-tests" depends="compile-runner">
 		<delete dir="${test.classes}" quiet="true"/>
 		<mkdir dir="${test.classes}"/>
-		<javac srcdir="tests" destdir="${test.classes}" source="1.8" target="1.8"
+		<javac srcdir="tests" destdir="${test.classes}" release="11"
 		       includeantruntime="false" debug="true" encoding="UTF-8">
 			<compilerarg value="-Xlint:all"/>
 			<compilerarg value="-Xlint:-serial"/>
@@ -110,14 +110,14 @@
 		<delete dir="${fixture.classes}" quiet="true"/>
 		<mkdir dir="${selfcheck.classes}"/>
 		<mkdir dir="${fixture.classes}"/>
-		<javac srcdir="selfcheck/src" destdir="${selfcheck.classes}" source="1.8" target="1.8"
+		<javac srcdir="selfcheck/src" destdir="${selfcheck.classes}" release="11"
 		       includeantruntime="false" debug="true" encoding="UTF-8">
 			<compilerarg value="-Xlint:all"/>
 			<compilerarg value="-Xlint:-serial"/>
 			<compilerarg value="-Xlint:-options"/>
 			<classpath refid="classpath.tests"/>
 		</javac>
-		<javac srcdir="selfcheck/fixtures" destdir="${fixture.classes}" source="1.8" target="1.8"
+		<javac srcdir="selfcheck/fixtures" destdir="${fixture.classes}" release="11"
 		       includeantruntime="false" debug="true" encoding="UTF-8">
 			<compilerarg value="-Xlint:all"/>
 			<compilerarg value="-Xlint:-serial"/>

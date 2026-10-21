@@ -21,6 +21,14 @@ import javax.tools.ToolProvider;
 
 import com.fasterxml.jackson.jr.ob.JSON;
 
+import com.carolinarollergirls.scoreboard.reliability.harness.Bout;
+import com.carolinarollergirls.scoreboard.reliability.harness.Replayer;
+import com.carolinarollergirls.scoreboard.reliability.harness.ServerLauncher;
+import com.carolinarollergirls.scoreboard.reliability.harness.Trace;
+import com.carolinarollergirls.scoreboard.reliability.harness.TraceFormatException;
+import com.carolinarollergirls.scoreboard.reliability.harness.TraceReader;
+import com.carolinarollergirls.scoreboard.reliability.harness.TraceWriter;
+
 /**
  * Programmatic version of the Phase 0 verification checklist (M1-M13) and pilot steps P1 and P3.
  * <p>
@@ -153,6 +161,11 @@ public final class SelfCheck {
         // M14-M15: properties every manifest entry must have.
         checkM14(manifestJson);
         checkM15(manifestJson);
+
+        // H1-H4: the protocol harness (Phase 2).
+        checkH1();
+        checkH2();
+        checkH3H4();
 
         // Pilot steps that can be automated.
         checkP1(manifestJson);
@@ -468,6 +481,119 @@ public final class SelfCheck {
         List<Map<String, Object>> list = new ArrayList<>();
         for (Object e : (List<?>) manifestJson.get("expectedFailures")) { list.add((Map<String, Object>) e); }
         return list;
+    }
+
+    /** H1: the launcher starts the packaged server and never leaves a process behind, also across kill -9. */
+    void checkH1() {
+        List<String> p = new ArrayList<>();
+        long firstPid = -1, secondPid = -1;
+        ServerLauncher s = null;
+        try {
+            s = ServerLauncher.start(repoDir, new File(workRoot, "h1-launcher/server"));
+            firstPid = s.pid();
+            s.kill(ServerLauncher.Signal.KILL);
+            if (ProcessHandle.of(firstPid).map(ProcessHandle::isAlive).orElse(false)) {
+                p.add("server " + firstPid + " still alive after kill -9");
+            }
+            s.restart();
+            secondPid = s.pid();
+            if (!s.isAlive()) { p.add("server did not come back after restart"); }
+        } catch (Exception e) { p.add("launcher failed: " + e.getMessage()); } finally {
+            if (s != null) { s.close(); }
+        }
+        for (long pid : new long[] {firstPid, secondPid}) {
+            if (pid > 0 && ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false)) {
+                p.add("server " + pid + " still alive after close()");
+            }
+        }
+        add("H1", "Launcher starts the packaged server, survives kill -9 and restart, and leaves no process behind", p,
+            "pids " + firstPid + ", " + secondPid + " both gone");
+    }
+
+    /** H2: traces round-trip through the writer and reader; the reader rejects bad traces, naming the line. */
+    void checkH2() {
+        List<String> p = new ArrayList<>();
+        Trace t = Bout.create("round trip")
+                      .device("a", "/nso/sbo?game=$GAME")
+                      .var("X", "1")
+                      .at(0)
+                      .on("a")
+                      .connect()
+                      .register("ScoreBoard.Game($GAME)")
+                      .at(10)
+                      .on("a")
+                      .startJam()
+                      .expect(500, "ScoreBoard.Game($GAME).InJam", null)
+                      .at(20)
+                      .mark("m")
+                      .build();
+        List<String> once = TraceWriter.lines(t);
+        try {
+            List<String> twice = TraceWriter.lines(TraceReader.parse(once));
+            if (!once.equals(twice)) { p.add("round trip changed the trace: " + shorten(once + " vs " + twice)); }
+        } catch (TraceFormatException e) { p.add("round trip failed to parse: " + e.getMessage()); }
+        String header = "{\"trace\":1,\"devices\":{\"a\":{\"source\":\"/\"}}}";
+        Map<String, List<String>> bad = new LinkedHashMap<>();
+        bad.put("version", Arrays.asList("{\"trace\":2}"));
+        bad.put("unknown event", Arrays.asList(header, "{\"t\":0,\"ev\":\"teleport\"}"));
+        bad.put("t backwards", Arrays.asList(header, "{\"t\":5,\"ev\":\"mark\"}", "{\"t\":4,\"ev\":\"mark\"}"));
+        bad.put("unknown device", Arrays.asList(header, "{\"t\":0,\"ev\":\"connect\",\"dev\":\"b\"}"));
+        bad.put("unknown var", Arrays.asList(header, "{\"t\":0,\"ev\":\"send\",\"dev\":\"a\",\"msg\":\"$NOPE\"}"));
+        for (Map.Entry<String, List<String>> b : bad.entrySet()) {
+            try {
+                TraceReader.parse(b.getValue());
+                p.add(b.getKey() + ": accepted");
+            } catch (TraceFormatException e) {
+                if (!e.getMessage().startsWith("line ")) {
+                    p.add(b.getKey() + ": message names no line: " + e.getMessage());
+                }
+            }
+        }
+        add("H2",
+            "Traces round-trip through writer and reader; bad version, event, time, device and variable are "
+                + "rejected with a line number",
+            p, once.size() + " lines round-tripped; " + bad.size() + " bad traces rejected");
+    }
+
+    /** H3: a canned trace replays with every expect passing. H4: a wrong expect fails, naming its trace line. */
+    void checkH3H4() {
+        File canned = new File(repoDir, "reliability/selfcheck/traces/start-stop.crgtrace.jsonl");
+        List<String> p3 = new ArrayList<>();
+        List<String> p4 = new ArrayList<>();
+        String d3 = "", d4 = "";
+        try {
+            Trace good = TraceReader.read(canned);
+            try (ServerLauncher s = ServerLauncher.start(repoDir, new File(workRoot, "h3-replay/server"))) {
+                Replayer.Result r = Replayer.replay(good, s);
+                for (Replayer.Failure f : r.failures) { p3.add(f.toString()); }
+                d3 = good.events().size() + " events, " + r.devices.size() + " devices, all expects passed";
+            }
+            List<String> lines = new ArrayList<>(java.nio.file.Files.readAllLines(canned.toPath()));
+            int wrongLine = -1;
+            for (int i = 0; i < lines.size(); i++) {
+                if (lines.get(i).contains("\"ev\":\"expect\"") && lines.get(i).contains(":false}")) {
+                    lines.set(i, lines.get(i).replace(":false}", ":\"banana\"}"));
+                    wrongLine = i + 1;
+                    break;
+                }
+            }
+            Trace bad = TraceReader.parse(lines);
+            try (ServerLauncher s = ServerLauncher.start(repoDir, new File(workRoot, "h4-replay/server"))) {
+                Replayer.Result r = Replayer.replay(bad, s);
+                if (r.failures.size() != 1) {
+                    p4.add("expected exactly 1 failure, got " + r.failures);
+                } else if (r.failures.get(0).event.line != wrongLine) {
+                    p4.add("failure names line " + r.failures.get(0).event.line + ", expected " + wrongLine);
+                } else {
+                    d4 = r.failures.get(0).toString();
+                }
+            }
+        } catch (Exception e) {
+            p3.add("could not run: " + e);
+            p4.add("could not run: " + e);
+        }
+        add("H3", "A canned two-device trace replays against the packaged server with every expect passing", p3, d3);
+        add("H4", "A trace with a wrong expect fails exactly there, naming the trace line", p4, shorten(d4));
     }
 
     void checkP1(Map<String, Object> manifestJson) throws Exception {

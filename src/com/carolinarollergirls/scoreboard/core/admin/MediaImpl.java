@@ -16,6 +16,7 @@ import java.nio.file.WatchKey;
 import java.nio.file.WatchService;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.Collection;
+import java.util.regex.Pattern;
 
 import com.carolinarollergirls.scoreboard.core.interfaces.Media;
 import com.carolinarollergirls.scoreboard.core.interfaces.ScoreBoard;
@@ -119,8 +120,12 @@ public final class MediaImpl extends ScoreBoardEventProviderImpl<Media> implemen
 
     @Override
     public boolean validFileName(String fn) {
-        return !fn.matches("(^\\.)|(\\.[dD][bB]$)|\\\\|/");
+        // find(), not matches(): matches() needs the whole name to match, so it let "../x" and "a/b" through.
+        return fn != null && !fn.isEmpty() && !INVALID_FILE_NAME.matcher(fn).find();
     }
+
+    // Hidden files (and so "." and ".."), Windows thumbnail databases, and anything with a path separator.
+    private static final Pattern INVALID_FILE_NAME = Pattern.compile("(^\\.)|(\\.[dD][bB]$)|\\\\|/");
 
     private void mediaFileCreated(String format, String type, String filename) {
         synchronized (coreLock) {

@@ -150,31 +150,47 @@ ant -f reliability/build.xml verify -Dverify.quick=true
 
 Run the full `verify` before a PR.
 
-## Recording real games (prototype)
+## Recording real games
 
-`RecordingProxy` sits in front of CRG at a game and writes what every device sends as a trace that the harness can replay. CRG itself is unchanged.
+`RecordingProxy` sits in front of CRG at a game and writes what every device sends as a trace that the harness can replay. CRG itself is unchanged. The crew-facing instructions are in [RECORDING.md](RECORDING.md).
+
+**For a crew's laptop:** `ant -f reliability/build.xml recorder-jar` builds `reliability/build/recorder/`: `crg-recorder.jar` (one file, Jackson included, Java 11+), launchers for Windows, macOS and Linux, and `RECORDING.md`. Copy them into the CRG folder. The launcher starts CRG on `127.0.0.1:8001` and the recorder on port 8000, so devices connect as usual. If CRG exits, the recorder writes its trace and stops.
+
+**From a checkout**, in front of a CRG you started yourself on a local-only port:
 
 ```
-java -jar lib/crg-scoreboard.jar --port=8001 --host=127.0.0.1     # CRG, reachable only from this laptop
-ant -f reliability/build.xml record                               # devices use port 8000 as usual
+java -jar lib/crg-scoreboard.jar --port=8001 --host=127.0.0.1
+ant -f reliability/build.xml record          # -Drecord.listen=8000 -Drecord.target=127.0.0.1:8001 -Drecord.redact=true
 ```
 
-Devices keep using `http://<laptop>:8000/`. The start page's links and QR codes show the proxy's addresses. Press Ctrl-C to stop; the trace is then in `reliability/captures/<date-time>/trace.crgtrace.jsonl`, next to `seed.json` (the state when recording started) and `files/` (uploads). Options: `-Drecord.listen=8000`, `-Drecord.target=127.0.0.1:8001`, `-Drecord.out=<dir>`. If the proxy dies without writing the trace, run `java -cp … RecordingProxy --assemble=<dir>`; every event up to the crash is already on disk in `events.partial.jsonl`.
+Either way, Ctrl-C (or SIGTERM; a shell ignores SIGINT for background jobs) writes `captures/<date-time>/trace.crgtrace.jsonl`, next to `seed.json`, `capture.json` and `files/`. If the recorder dies first, `java -jar crg-recorder.jar --assemble=<dir>` rebuilds the trace from `events.partial.jsonl`.
 
 To replay a capture on a fresh server:
 
 ```
-ant -f reliability/build.xml replay -Dtrace=reliability/captures/<dir>/trace.crgtrace.jsonl
+ant -f reliability/build.xml replay -Dtrace=<dir>/trace.crgtrace.jsonl
 ```
 
-What it records: each WebSocket connect, message (verbatim) and disconnect (clean or dropped), and every POST, with uploaded files. It also strips `Sec-WebSocket-Extensions` from upgrades, so frames are not compressed and can be read. Everything else passes through byte for byte.
+**What it records:** each WebSocket connect, message and disconnect (clean or dropped), and every POST with its uploaded files.
 
-**Privacy:** session cookies are never written. **Skater and team names are not redacted yet**, so captures stay out of git (`reliability/.gitignore`) until redaction exists.
+**What it changes:**
+- It strips `Sec-WebSocket-Extensions` from upgrades, so frames aren't compressed and can be read.
+- It rewrites the body of `/urls`, so the start page's links and QR codes point at it.
 
-Limits of the prototype:
-- Each WebSocket connection becomes its own trace device, so a reconnecting SBO appears as `sbo`, then `sbo-2`.
+Everything else passes through byte for byte.
+
+**Device names:** each page that connects becomes a trace device named after it (`sbo`, `standard`). A device that reconnects to the same page continues as the same trace device; a second copy open at the same time becomes `sbo-2`.
+
+**Privacy:**
+- **Names are redacted by default** (`Redactor`). The values of name and free-text properties (`Name`, `FullName`, `LeagueName`, `TeamName`, `League`, `Pronouns`, `Initials`, annotations, comments, file names, `EventInfo(*)`, `AlternateName(*)`, …) and prepared-team IDs become consistent placeholders (`Name-7`, `Team-2`), in the seed, in messages and in loaded JSON games.
+- Loaded spreadsheets are not kept when redacting.
+- Session cookies are never written.
+- Redacted messages are re-serialised, so they are no longer byte-for-byte; the header says `"redacted": true`.
+- `--redact=false` keeps everything. Captures are git-ignored either way.
+
+**Limits:**
 - Times are when the proxy saw each message, slightly before CRG did.
-- The proxy can't see the order CRG applied messages in. That needs the in-product recorder.
+- The proxy can't see the order CRG applied messages in. That needs the in-product recorder (workstream C2).
 
 ## How expected failures work
 

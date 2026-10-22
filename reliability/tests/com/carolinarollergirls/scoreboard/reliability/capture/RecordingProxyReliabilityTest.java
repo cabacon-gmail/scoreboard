@@ -50,6 +50,13 @@ public class RecordingProxyReliabilityTest {
                         g + ".Team(1).TripScore", 1, "change"));
                     assertTrue("setup: point " + i + " not applied", sk.awaitValue(g + ".Team(1).Score", i, 3000));
                 }
+                // The SK's Wi-Fi drops and it reconnects: it must stay one trace device.
+                sk.disconnect();
+                Thread.sleep(300);
+                sk.connect(port);
+                sk.register(g + ".Team(1)");
+                assertTrue("setup: SK did not get its state back after reconnecting",
+                           sk.await(s -> s.containsKey(g + ".Team(1).Score"), 3000));
                 Map<String, String> form = new LinkedHashMap<>();
                 form.put("media", "images");
                 form.put("type", "teamlogo");
@@ -72,7 +79,17 @@ public class RecordingProxyReliabilityTest {
         }
 
         Trace trace = TraceReader.read(new File(capture, "trace.crgtrace.jsonl"));
-        assertEquals("captured devices", 2, trace.devices().size());
+        assertEquals("captured devices (a reconnect continues the same device): " + trace.devices().keySet(), 2,
+                     trace.devices().size());
+        assertEquals("redacted header", Boolean.TRUE, trace.header().get("redacted"));
+        String seedText = new String(java.nio.file.Files.readAllBytes(new File(capture, "seed.json").toPath()),
+                                     StandardCharsets.UTF_8);
+        String traceText = new String(
+            java.nio.file.Files.readAllBytes(new File(capture, "trace.crgtrace.jsonl").toPath()), StandardCharsets.UTF_8);
+        for (String name : new String[] { "\"Black\"", "\"White\"", "(Black)", "(White)" }) {
+            assertTrue("the seed still contains the team name " + name, !seedText.contains(name));
+            assertTrue("the trace still contains the team name " + name, !traceText.contains(name));
+        }
         long sends = trace.events().stream().filter(e -> "send".equals(e.ev)).count();
         long https = trace.events().stream().filter(e -> "http".equals(e.ev)).count();
         assertTrue("expected the WebSocket messages in the trace, got " + sends, sends >= 7);

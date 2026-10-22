@@ -30,6 +30,7 @@ import com.carolinarollergirls.scoreboard.core.ScoreBoardImpl;
 import com.carolinarollergirls.scoreboard.core.interfaces.ScoreBoard;
 import com.carolinarollergirls.scoreboard.jetty.ScoreBoardWebserver;
 import com.carolinarollergirls.scoreboard.json.AutoSaveJSONState;
+import com.carolinarollergirls.scoreboard.json.Checkpoints;
 import com.carolinarollergirls.scoreboard.json.JSONStateManager;
 import com.carolinarollergirls.scoreboard.json.ScoreBoardJSONListener;
 import com.carolinarollergirls.scoreboard.utils.BasePath;
@@ -79,6 +80,9 @@ public final class Main extends Logger {
                 scoreBoard.postAutosaveUpdate();
             }
         });
+
+        // Restore points older than 90 days are no longer useful.
+        Checkpoints.cleanup();
 
         // Only start auto-saves once everything is loaded in.
         final AutoSaveJSONState autosaver = new AutoSaveJSONState(jsm, autoSaveDir, useMetrics);

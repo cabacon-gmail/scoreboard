@@ -4,7 +4,8 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import com.fasterxml.jackson.jr.ob.JSON;
 
@@ -26,6 +27,8 @@ public final class JSONStateSnapshotter implements JSONStateListener {
                                       .help("Time spent writing JSON state snapshots to disk")
                                       .register();
         }
+        game = g;
+        gameId = g.getId();
         filters.add("ScoreBoard.Version");
         filters.add("ScoreBoard.Game(" + g.getId() + ")");
         jsm.register(this);
@@ -34,14 +37,19 @@ public final class JSONStateSnapshotter implements JSONStateListener {
     @Override
     public void sendUpdates(StateTrie newState, StateTrie changedState) {
         state = newState;
-        if (writeOnNextUpdate.getAndSet(false)) { writeFile(); }
+        String reason = writeOnNextUpdate.getAndSet(null);
+        if (reason != null) { writeFile(reason); }
     }
 
-    public void writeOnNextUpdate() { writeOnNextUpdate.set(true); }
+    /**
+     * Writes the game's file, and keeps a restore point, once the current batch of changes has been applied.
+     * {@code reason} names the moment: {@code jam-end}, {@code timeout-end}, {@code period-end}.
+     */
+    public void writeOnNextUpdate(String reason) { writeOnNextUpdate.set(reason); }
 
     public synchronized void setFilename(String newName) { filename = newName; }
 
-    public synchronized void writeFile() {
+    public synchronized void writeFile(String reason) {
         Histogram.Timer timer = useMetrics ? updateStateDuration.startTimer() : null;
 
         File file = new File(new File(directory, "html/game-data/json"), filename + ".json");
@@ -52,10 +60,11 @@ public final class JSONStateSnapshotter implements JSONStateListener {
         OutputStreamWriter out = null;
         try {
             // Put inside a "state" entry to match the WS.
+            Map<String, Object> gameState = state.filter(filters, true);
             String json = JSON.std.with(JSON.Feature.PRETTY_PRINT_OUTPUT)
                               .composeString()
                               .startObject()
-                              .putObject("state", state.filter(filters, true))
+                              .putObject("state", gameState)
                               .end()
                               .finish();
             tmp = File.createTempFile(file.getName(), ".tmp", directory);
@@ -65,6 +74,9 @@ public final class JSONStateSnapshotter implements JSONStateListener {
             prev.delete();
             file.renameTo(prev);
             if (tmp.renameTo(file)) { prev.delete(); }
+            // Also keep this version as a restore point for the Recovery screen.
+            String error = Checkpoints.write(filename, gameId, gameState, json, reason);
+            reportCheckpointError(error == null ? "" : error);
         } catch (Exception e) { Logger.printStackTrace("writing JSON snapshot", e); } finally {
             if (out != null) {
                 try {
@@ -80,9 +92,19 @@ public final class JSONStateSnapshotter implements JSONStateListener {
         if (useMetrics) { timer.observeDuration(); }
     }
 
+    private void reportCheckpointError(String error) {
+        if (!error.equals(lastCheckpointError)) {
+            lastCheckpointError = error;
+            game.set(Game.CHECKPOINT_ERROR, error);
+        }
+    }
+
+    private final Game game;
+    private final String gameId;
+    private String lastCheckpointError = "";
     private File directory;
     private String filename;
-    private AtomicBoolean writeOnNextUpdate = new AtomicBoolean(false);
+    private AtomicReference<String> writeOnNextUpdate = new AtomicReference<>(null);
     private StateTrie state = new StateTrie();
     private PathTrie filters = new PathTrie();
 

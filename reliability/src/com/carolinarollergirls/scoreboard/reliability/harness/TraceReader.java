@@ -87,6 +87,12 @@ public final class TraceReader {
             if ("send".equals(e.ev) && e.get("msg") == null) {
                 throw new TraceFormatException(where + ": 'send' needs 'msg'");
             }
+            if ("http".equals(e.ev) && (!(e.get("method") instanceof String) || !(e.get("path") instanceof String))) {
+                throw new TraceFormatException(where + ": 'http' needs 'method' and 'path'");
+            }
+            if ("clock".equals(e.ev) && !(e.get("step") instanceof Number)) {
+                throw new TraceFormatException(where + ": 'clock' needs 'step' (ms, whole seconds)");
+            }
             if ("expect".equals(e.ev) && !(e.get("state") instanceof Map)) {
                 throw new TraceFormatException(where + ": 'expect' needs a 'state' object");
             }

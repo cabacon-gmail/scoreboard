@@ -27,6 +27,33 @@ public final class Replayer {
     public static final class Options {
         public Timing timing = Timing.REALTIME;
         public boolean stopAtFirstFailure = false;
+        /** Directory that relative file names in {@code http} events resolve against. */
+        public java.io.File baseDir = new java.io.File(".");
+        /**
+         * Leave devices and the observer connected after the last event, so oracles can check convergence. The
+         * caller then closes them with {@link Result#close()} (closing the server does too).
+         */
+        public boolean keepConnected = false;
+        /** Called after each event is executed, for checks that must happen mid-trace. Exceptions are failures. */
+        public EventHook afterEvent;
+        /** Steps the server's wall clock for {@code clock} events; null rejects them. */
+        public ClockControl clock;
+    }
+
+    /** See {@link Options#afterEvent}. */
+    public interface EventHook {
+        void after(Trace.Event event, Result result) throws Exception;
+    }
+
+    /** The response to one {@code http} event. */
+    public static final class HttpExchange {
+        HttpExchange(Trace.Event event, DeviceClient.HttpResult response) {
+            this.event = event;
+            this.response = response;
+        }
+
+        public final Trace.Event event;
+        public final DeviceClient.HttpResult response;
     }
 
     /** A failed expect, or an event that could not be executed. */
@@ -49,12 +76,22 @@ public final class Replayer {
         public final List<Failure> failures = new ArrayList<>();
         public final Map<String, DeviceClient> devices = new LinkedHashMap<>();
         public DeviceClient observer;
+        public final List<HttpExchange> http = new ArrayList<>();
         public Map<String, Object> vars;
 
         /** The observer's final state. */
         public Map<String, Object> state() { return observer.state(); }
 
         public boolean ok() { return failures.isEmpty(); }
+
+        /** Closes every device and the observer. */
+        public void close() {
+            for (DeviceClient d : devices.values()) { d.close(); }
+            if (observer != null) { observer.close(); }
+            for (FaultProxy p : proxies.values()) { p.close(); }
+        }
+
+        final Map<String, FaultProxy> proxies = new LinkedHashMap<>();
     }
 
     private Replayer(Trace trace, ServerLauncher server, Options options) {
@@ -82,15 +119,15 @@ public final class Replayer {
                 if (options.timing == Timing.REALTIME) { sleepUntil(start + TimeUnit.MILLISECONDS.toNanos(e.t)); }
                 try {
                     execute(e, result);
-                } catch (IOException | RuntimeException ex) {
+                    if (options.afterEvent != null) { options.afterEvent.after(e, result); }
+                } catch (Exception ex) {
                     result.failures.add(new Failure(e, "could not execute: " + ex));
                 }
                 if (options.stopAtFirstFailure && !result.failures.isEmpty()) { break; }
             }
         } finally {
-            for (DeviceClient d : result.devices.values()) { d.close(); }
-            for (FaultProxy p : proxies.values()) { p.close(); }
-            if (result.observer != null) { result.observer.close(); }
+            result.proxies.putAll(proxies);
+            if (!options.keepConnected) { result.close(); }
         }
         return result;
     }
@@ -168,6 +205,30 @@ public final class Replayer {
             }
             break;
         }
+        case "http": {
+            DeviceClient d = deviceForHttp(e, result);
+            String method = String.valueOf(e.get("method"));
+            String path = subst(String.valueOf(e.get("path")), result.vars);
+            Map<String, String> form = new LinkedHashMap<>();
+            if (e.get("form") instanceof Map) {
+                for (Map.Entry<String, Object> f : ((Map<String, Object>) e.get("form")).entrySet()) {
+                    form.put(f.getKey(), subst(String.valueOf(f.getValue()), result.vars));
+                }
+            }
+            List<DeviceClient.Upload> files = new ArrayList<>();
+            if (e.get("files") instanceof List) {
+                for (Object o : (List<Object>) e.get("files")) { files.add(upload((Map<String, Object>) o)); }
+            }
+            result.http.add(new HttpExchange(e, d.http(method, path, form, files)));
+            break;
+        }
+        case "clock": {
+            if (options.clock == null || !options.clock.available()) {
+                throw new IOException("a 'clock' event needs Options.clock (ClockControl) to be available");
+            }
+            options.clock.step(((Number) e.get("step")).longValue());
+            break;
+        }
         case "expect": expect(e, (Map<String, Object>) e.get("state"), result); break;
         case "recv":
         case "mark": break; // informational
@@ -208,6 +269,37 @@ public final class Replayer {
             if (!Messages.jsonEquals(s.get(w.getKey()), w.getValue())) { return false; }
         }
         return true;
+    }
+
+    /** HTTP needs only a cookie, so a device may make requests before it opens a WebSocket. */
+    private DeviceClient deviceForHttp(Trace.Event e, Result result) {
+        DeviceClient d = result.devices.get(e.dev);
+        if (d == null) {
+            Map<String, Object> spec = trace.devices().get(e.dev);
+            d = new DeviceClient(e.dev, server.port(), subst(String.valueOf(spec.getOrDefault("source", "")), result.vars),
+                                 String.valueOf(spec.getOrDefault("platform", "trace")));
+            result.devices.put(e.dev, d);
+        }
+        return d;
+    }
+
+    /** A file part: {@code {"field","name"}} plus one of {@code text}, {@code base64} or {@code from} (a path). */
+    private DeviceClient.Upload upload(Map<String, Object> f) throws IOException {
+        String field = String.valueOf(f.getOrDefault("field", "file"));
+        String name = String.valueOf(f.get("name"));
+        byte[] content;
+        if (f.get("text") != null) {
+            content = String.valueOf(f.get("text")).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        } else if (f.get("base64") != null) {
+            content = java.util.Base64.getDecoder().decode(String.valueOf(f.get("base64")));
+        } else if (f.get("from") != null) {
+            java.io.File src = new java.io.File(String.valueOf(f.get("from")));
+            if (!src.isAbsolute()) { src = new java.io.File(options.baseDir, src.getPath()); }
+            content = java.nio.file.Files.readAllBytes(src.toPath());
+        } else {
+            throw new IOException("file part '" + name + "' needs text, base64 or from");
+        }
+        return new DeviceClient.Upload(field, name, content);
     }
 
     private DeviceClient device(Trace.Event e, Result result) throws IOException {

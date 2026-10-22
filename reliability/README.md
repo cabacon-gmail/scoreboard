@@ -98,7 +98,7 @@ A check is skipped rather than failed when it can't run. That happens for M12 wi
 
 ## Protocol harness (Phase 2)
 
-Tests under `reliability/tests/.../reliability/protocol/` drive the **packaged server** (`lib/crg-scoreboard.jar`) the way a crew's devices do, over `/WS/`. Design: [Phase 2](https://github.com/cabacon-gmail/crg-reliability-plan/blob/main/docs/phase2-protocol-harness.md).
+Tests under `reliability/tests/.../reliability/` in `protocol/`, `bout/`, `clock/` and `crash/` drive the **packaged server** (`lib/crg-scoreboard.jar`) the way a crew's devices do, over `/WS/`. Design: [Phase 2](https://github.com/cabacon-gmail/crg-reliability-plan/blob/main/docs/phase2-protocol-harness.md).
 
 - **Everything is a trace.** A test builds a trace with the `Bout` DSL, or reads a `.crgtrace.jsonl` file, and `Replayer` plays it. Tests save their trace in their work dir (e.g. `reliability/build/work/<Class>/f6-pilot.crgtrace.jsonl`), so any run can be replayed exactly.
 - **`ServerLauncher`** starts the jar in a fresh directory on a free port, with an optional seed autosave. Stopping always kills the process tree, also from a shutdown hook.
@@ -119,6 +119,78 @@ try (ServerLauncher server = ServerLauncher.start(ServerLauncher.repoDirFromRunn
 ```
 
 `$GAME` is the current game's ID, resolved at replay. Wrap DSL chains in `// clang-format off` / `// clang-format on` so they read as a timeline.
+
+### Crews, seeds and the reference bout
+
+- **Crew profiles** (`reliability/crews/<profile>.json`) list each device of a crew, the page it claims to be, and the exact paths its real screen registers. `Bout.crew(CrewProfile.load(repo, "default")).connectCrew(100)` connects them all. The `default` profile is the plan's nine-device crew (SBO, JT, two SKs, PT, LT, PBT, main display, overlay).
+- **Harvesting** regenerates a profile from the real screens. Edit `crews/<profile>.screens.json`, then run `node reliability/tools/harvest-crew.js <profile>`. It needs Node and Playwright with Chromium (`npm install --no-save playwright && npx playwright install chromium`), but only for this tool: the tests never need a browser. Re-run it when screens change, and commit the result.
+- **Seeds** (`reliability/seeds/*.json`) are autosave-format starting states. `two-teams-short-periods.json` has two 15-skater teams and a ruleset with 2-minute periods, 30-second jams and a 1-minute intermission. Regenerate with `ant -f reliability/build.xml seeds`.
+- **`ReferenceBout`** is a whole two-period game for a crew on that seed, in about 5 1/2 minutes. `ReferenceBoutReliabilityTest` plays it with no faults; its press-to-visible latency lands in `reliability/build/work/<Class>/reference-bout-latency.json`. F12 and F15 build on it.
+- **`Oracles`**: `convergence` (each device's mirror equals the observer for the paths it registered), `invariants` (score equals the sum of jam scores, jam numbers contiguous, at most one timeout running) and `scorePressLatency`.
+
+### HTTP, clock steps and test options
+
+- `Bout.http(method, path, form, files)` makes a request with the device's cookie, for example an upload. The server only knows a device once its page has opened the WebSocket, so `connect()` first. Responses are in `Result.http`.
+- `Bout.clock(ms)` steps the server's wall clock, through `ClockControl`: libfaketime on Linux and macOS, or, on Windows, the real system clock when you opt in (below).
+- Options for individual tests are passed on the ant command line as `-Dreliability.<name>=…` and reach every test JVM:
+
+| Option | Used by | Meaning |
+| --- | --- | --- |
+| `reliability.statsbook` | F2 | Path to a blank WFTDA StatsBook `.xlsx`. Without it, F2 is `SKIPPED`. |
+| `reliability.libfaketime` | F1 | Path to `libfaketimeMT.so.1` (Linux) or `libfaketimeMT.1.dylib` (macOS), if not in the usual place. Install with `sudo apt install faketime` or `brew install libfaketime`. Without it, F1 is `SKIPPED`. |
+| `reliability.allowClockChanges` | F1 | Windows only: `true` lets F1 step the real system clock by 5 minutes and back. Run from an elevated shell; the Windows Time service is stopped during the test and restarted afterwards. |
+| `reliability.seed` | F12 | Seed for the random kill times. |
+
+The bout tests are slow: the reference bout takes about 6 minutes, F15 about 12, F12 about 3. They are marked `@Slow` (in `support`). A full run, and `verify`, take about 25 minutes more because of them. For a quick loop, leave them out:
+
+```
+ant -f reliability/build.xml reliability -Dquick=true
+ant -f reliability/build.xml verify -Dverify.quick=true
+```
+
+Run the full `verify` before a PR.
+
+## Recording real games
+
+`RecordingProxy` sits in front of CRG at a game and writes what every device sends as a trace that the harness can replay. CRG itself is unchanged. The crew-facing instructions are in [RECORDING.md](RECORDING.md).
+
+**For a crew's laptop:** `ant -f reliability/build.xml recorder-jar` builds `reliability/build/recorder/`: `crg-recorder.jar` (one file, Jackson included, Java 11+), launchers for Windows, macOS and Linux, and `RECORDING.md`. Copy them into the CRG folder. The launcher starts CRG on `127.0.0.1:8001` and the recorder on port 8000, so devices connect as usual. If CRG exits, the recorder writes its trace and stops.
+
+**From a checkout**, in front of a CRG you started yourself on a local-only port:
+
+```
+java -jar lib/crg-scoreboard.jar --port=8001 --host=127.0.0.1
+ant -f reliability/build.xml record          # -Drecord.listen=8000 -Drecord.target=127.0.0.1:8001 -Drecord.redact=true
+```
+
+Either way, Ctrl-C (or SIGTERM; a shell ignores SIGINT for background jobs) writes `captures/<date-time>/trace.crgtrace.jsonl`, next to `seed.json`, `capture.json` and `files/`. If the recorder dies first, `java -jar crg-recorder.jar --assemble=<dir>` rebuilds the trace from `events.partial.jsonl`.
+
+To replay a capture on a fresh server:
+
+```
+ant -f reliability/build.xml replay -Dtrace=<dir>/trace.crgtrace.jsonl
+```
+
+**What it records:** each WebSocket connect, message and disconnect (clean or dropped), and every POST with its uploaded files.
+
+**What it changes:**
+- It strips `Sec-WebSocket-Extensions` from upgrades, so frames aren't compressed and can be read.
+- It rewrites the body of `/urls`, so the start page's links and QR codes point at it.
+
+Everything else passes through byte for byte.
+
+**Device names:** each page that connects becomes a trace device named after it (`sbo`, `standard`). A device that reconnects to the same page continues as the same trace device; a second copy open at the same time becomes `sbo-2`.
+
+**Privacy:**
+- **Names are redacted by default** (`Redactor`). The values of name and free-text properties (`Name`, `FullName`, `LeagueName`, `TeamName`, `League`, `Pronouns`, `Initials`, annotations, comments, file names, `EventInfo(*)`, `AlternateName(*)`, …) and prepared-team IDs become consistent placeholders (`Name-7`, `Team-2`), in the seed, in messages and in loaded JSON games.
+- Loaded spreadsheets are not kept when redacting.
+- Session cookies are never written.
+- Redacted messages are re-serialised, so they are no longer byte-for-byte; the header says `"redacted": true`.
+- `--redact=false` keeps everything. Captures are git-ignored either way.
+
+**Limits:**
+- Times are when the proxy saw each message, slightly before CRG did.
+- The proxy can't see the order CRG applied messages in. That needs the in-product recorder (workstream C2).
 
 ## How expected failures work
 
@@ -177,6 +249,7 @@ Helpers in `com.carolinarollergirls.scoreboard.reliability.support`:
 | `ProductFixture.newScoreBoard()`, `finishStartup(sb)` | Create a second scoreboard, for example to restore an autosave into. |
 | `CapturingLogger` | Capture what the product logs (`new CapturingLogger()`, then `contains(...)`). The runner installs one for every class anyway, because the product's `Logger.printStackTrace` crashes without a logger. |
 | `Platform.assumeWindows(why)` | Run a test only on Windows. Elsewhere it is reported as `SKIPPED`, which never fails a run, and `verify` accepts a skipped entry for that OS. |
+| `@Slow("about N minutes")` | Mark a class that takes more than about a minute, so `-Dquick=true` can leave it out. |
 | `RateTest.run(iterations, body)` | Race-dependent scenarios that report a failure rate. Use distinct objects per iteration: non-capturing lambdas are a single shared instance. |
 
 Format Java sources with the repository's `.clang-format`.

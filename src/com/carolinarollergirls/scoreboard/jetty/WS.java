@@ -137,7 +137,9 @@ public class WS extends WebSocketServlet {
                     if (jsonPaths != null) {
                         PathTrie newPaths = new PathTrie();
                         for (Object p : jsonPaths) { newPaths.add((String) p); }
-                        synchronized (state) {
+                        // Same lock as sendUpdates: the new paths' current values and any later change to them
+                        // reach the device in order.
+                        synchronized (stateLock) {
                             sendWSUpdates(newPaths, state);
                             this.paths.merge(newPaths);
                         }
@@ -314,7 +316,7 @@ public class WS extends WebSocketServlet {
         // State changes from JSONStateManager.
         @Override
         public void sendUpdates(StateTrie fullState, StateTrie changedState) {
-            synchronized (state) {
+            synchronized (stateLock) {
                 state = fullState;
                 sendWSUpdates(paths, changedState);
             }
@@ -331,6 +333,8 @@ public class WS extends WebSocketServlet {
         protected Client sbClient;
         protected Device device;
         protected PathTrie paths = new PathTrie();
+        // Guards state and paths. (Locking on state itself didn't work: sendUpdates replaces it.)
+        private final Object stateLock = new Object();
         private StateTrie state = new StateTrie();
         private Session wsSession;
     }

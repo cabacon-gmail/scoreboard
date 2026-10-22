@@ -2,7 +2,6 @@ package com.carolinarollergirls.scoreboard.json;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -29,23 +28,27 @@ public class JSONStateManager {
 
     public void register(JSONStateListener source) {
         ExecutorService executor = Executors.newSingleThreadExecutor();
-        synchronized (sources) { sources.put(source, executor); }
-        // Send on the current state asynchronously.
-        final StateTrie localState = state;
-        pending.incrementAndGet();
-        executor.execute(new Runnable() {
-            @Override
-            public void run() {
-                source.sendUpdates(localState, localState);
-                pending.decrementAndGet();
-            }
-        });
+        // Under the same lock as updateState, so the snapshot is queued before any later update: the listener
+        // sees the full state first, then every change after it, in order.
+        synchronized (lock) {
+            sources.put(source, executor);
+            final StateTrie localState = state;
+            enqueue(executor, new Runnable() {
+                @Override
+                public void run() {
+                    source.sendUpdates(localState, localState);
+                }
+            });
+        }
     }
 
     public void unregister(JSONStateListener source) {
-        synchronized (sources) {
-            sources.get(source).shutdownNow();
-            sources.remove(source);
+        synchronized (lock) {
+            ExecutorService executor = sources.remove(source);
+            if (executor != null) {
+                // Updates still queued for this listener will never run.
+                pending.addAndGet(-executor.shutdownNow().size());
+            }
         }
     }
 
@@ -58,25 +61,23 @@ public class JSONStateManager {
     public void updateState(StateTrie updates) {
         Histogram.Timer timer = useMetrics ? updateStateDuration.startTimer() : null;
 
-        synchronized (state) { state = state.cloneAndMergeChangeTrie(updates); }
-        if (!updates.isEmpty()) {
-            final StateTrie localState = state;
-            final StateTrie localChanged = updates;
-
-            // Send updates async, as the WS connections can block if the
-            // kernel TCP send buffer fills up.
-            Set<JSONStateListener> sourceSet;
-            synchronized (sources) { sourceSet = sources.keySet(); }
-            for (JSONStateListener source : sourceSet) {
-                final JSONStateListener localSource = source;
-                pending.incrementAndGet();
-                sources.get(source).execute(new Runnable() {
-                    @Override
-                    public void run() {
-                        localSource.sendUpdates(localState, localChanged);
-                        pending.decrementAndGet();
-                    }
-                });
+        // One lock for the state and the listener map: listeners can connect and disconnect from other threads
+        // while an update is being fanned out. Queuing is cheap; sending happens on each listener's own thread,
+        // as the WS connections can block if the kernel TCP send buffer fills up.
+        synchronized (lock) {
+            state = state.cloneAndMergeChangeTrie(updates);
+            if (!updates.isEmpty()) {
+                final StateTrie localState = state;
+                final StateTrie localChanged = updates;
+                for (Map.Entry<JSONStateListener, ExecutorService> e : sources.entrySet()) {
+                    final JSONStateListener localSource = e.getKey();
+                    enqueue(e.getValue(), new Runnable() {
+                        @Override
+                        public void run() {
+                            localSource.sendUpdates(localState, localChanged);
+                        }
+                    });
+                }
             }
         }
 
@@ -84,8 +85,25 @@ public class JSONStateManager {
         if (useMetrics) { updateStateUpdates.observe(updates.size()); }
     }
 
-    public Map<String, Object> getState(boolean filterSecrets) { return state.getAll(filterSecrets); }
-    public Map<String, Object> getState() { return state.getAll(false); }
+    /** Queues {@code task} on a listener's executor, counting it until it has run. */
+    private void enqueue(ExecutorService executor, final Runnable task) {
+        pending.incrementAndGet();
+        executor.execute(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    task.run();
+                } finally { pending.decrementAndGet(); }
+            }
+        });
+    }
+
+    public Map<String, Object> getState(boolean filterSecrets) {
+        StateTrie s;
+        synchronized (lock) { s = state; }
+        return s.getAll(filterSecrets);
+    }
+    public Map<String, Object> getState() { return getState(false); }
 
     /** Wait for all pending updates to be sent out. This is intended for unit tests. */
     protected void waitForSent() {
@@ -96,7 +114,9 @@ public class JSONStateManager {
         }
     }
 
-    private Map<JSONStateListener, ExecutorService> sources = new HashMap<>();
+    /** Guards {@code state} and {@code sources}. */
+    private final Object lock = new Object();
+    private final Map<JSONStateListener, ExecutorService> sources = new HashMap<>();
     private StateTrie state = new StateTrie();
     private final AtomicInteger pending = new AtomicInteger();
 

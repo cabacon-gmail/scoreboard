@@ -98,6 +98,8 @@ public class ScoreBoardWebserver {
 
         HttpServlet ms = new MediaServlet(scoreBoard, new File(BasePath.get(), "html").getPath());
         sch.addServlet(new ServletHolder(ms), "/Media/*");
+
+        sch.addServlet(new ServletHolder(new RecoveryServlet(scoreBoard)), "/Recovery/*");
     }
 
     public void start() {

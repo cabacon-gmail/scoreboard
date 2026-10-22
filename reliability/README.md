@@ -150,6 +150,32 @@ ant -f reliability/build.xml verify -Dverify.quick=true
 
 Run the full `verify` before a PR.
 
+## Recording real games (prototype)
+
+`RecordingProxy` sits in front of CRG at a game and writes what every device sends as a trace that the harness can replay. CRG itself is unchanged.
+
+```
+java -jar lib/crg-scoreboard.jar --port=8001 --host=127.0.0.1     # CRG, reachable only from this laptop
+ant -f reliability/build.xml record                               # devices use port 8000 as usual
+```
+
+Devices keep using `http://<laptop>:8000/`. The start page's links and QR codes show the proxy's addresses. Press Ctrl-C to stop; the trace is then in `reliability/captures/<date-time>/trace.crgtrace.jsonl`, next to `seed.json` (the state when recording started) and `files/` (uploads). Options: `-Drecord.listen=8000`, `-Drecord.target=127.0.0.1:8001`, `-Drecord.out=<dir>`. If the proxy dies without writing the trace, run `java -cp … RecordingProxy --assemble=<dir>`; every event up to the crash is already on disk in `events.partial.jsonl`.
+
+To replay a capture on a fresh server:
+
+```
+ant -f reliability/build.xml replay -Dtrace=reliability/captures/<dir>/trace.crgtrace.jsonl
+```
+
+What it records: each WebSocket connect, message (verbatim) and disconnect (clean or dropped), and every POST, with uploaded files. It also strips `Sec-WebSocket-Extensions` from upgrades, so frames are not compressed and can be read. Everything else passes through byte for byte.
+
+**Privacy:** session cookies are never written. **Skater and team names are not redacted yet**, so captures stay out of git (`reliability/.gitignore`) until redaction exists.
+
+Limits of the prototype:
+- Each WebSocket connection becomes its own trace device, so a reconnecting SBO appears as `sbo`, then `sbo-2`.
+- Times are when the proxy saw each message, slightly before CRG did.
+- The proxy can't see the order CRG applied messages in. That needs the in-product recorder.
+
 ## How expected failures work
 
 Every test asserts the correct behaviour, so a test for an open issue fails. `expected-failures.json` lists those tests:

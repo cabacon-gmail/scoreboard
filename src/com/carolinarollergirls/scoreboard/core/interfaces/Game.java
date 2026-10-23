@@ -79,6 +79,15 @@ public interface Game extends ScoreBoardEventProvider {
     public void exportDone(boolean success, String failureText);
     public void clearStatsbookError();
 
+    /**
+     * Sets this game aside after it has been restored from a restore point: stops its clocks, adds
+     * "(abandoned {@code label})" to its name and moves its files to a new name, so the restored copy keeps the
+     * original name and statsbook file. Nothing else changes, so the abandoned game can still be looked at.
+     */
+    public void abandon(String label);
+    /** Asks for the game's file and a restore point to be written once the current changes are applied. */
+    public void saveRestorePoint(String reason);
+
     public OfficialPosition getOfficialPosition(String id);
 
     public enum State {
@@ -143,6 +152,8 @@ public interface Game extends ScoreBoardEventProvider {
     public static final Value<Boolean> CLOCK_DURING_FINAL_SCORE =
         new Value<>(Boolean.class, "ClockDuringFinalScore", false, props);
     public static final Value<String> EXPORT_BLOCKED_BY = new Value<>(String.class, "ExportBlockedBy", "", props);
+    /** Why the last restore point could not be saved; empty when saving works. */
+    public static final Value<String> CHECKPOINT_ERROR = new Value<>(String.class, "CheckpointError", "", props);
     public static final Value<Boolean> FIIIVE_SECONDS = new Value<>(Boolean.class, "FiveSeconds", false, props);
     public static final Value<Boolean> AUTO_FIVE = new Value<>(Boolean.class, "AutoFive", false, props);
     public static final Value<String> FIVE_INDICATOR = new Value<>(String.class, "FiveIndicator", "5", props);

@@ -96,8 +96,11 @@ public final class Checkpoints {
         s.put("period", number(state.get(p + "CurrentPeriodNumber")));
         s.put("jam", number(state.get(p + "Clock(Jam).Number")));
         s.put("inJam", Boolean.valueOf(String.valueOf(state.get(p + "InJam"))));
+        s.put("inPeriod", Boolean.valueOf(String.valueOf(state.get(p + "InPeriod"))));
         s.put("periodClock", number(state.get(p + "Clock(Period).Time")));
         s.put("officialScore", Boolean.valueOf(String.valueOf(state.get(p + "OfficialScore"))));
+        Object err = state.get(p + "CheckpointError");
+        s.put("checkpointError", err == null ? "" : err);
         return s;
     }
 

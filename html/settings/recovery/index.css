@@ -1,0 +1,20 @@
+#Games { padding: 0 8px 16px; }
+.Game { border: 1px solid #999; border-radius: 6px; margin: 10px 0; }
+.Game.Current { border: 2px solid #2a7; }
+.Game > .Summary { display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: baseline; padding: 8px 10px;
+  background: rgba(127, 127, 127, 0.12); }
+.Game > .Summary .Teams { font-weight: bold; }
+.Game > .Summary .Badge { font-size: 80%; padding: 1px 6px; border-radius: 4px; background: #2a7; color: #fff; }
+.Points { width: 100%; border-collapse: collapse; }
+.Points td, .Points th { padding: 4px 10px; text-align: left; }
+.Points th { font-weight: normal; opacity: 0.7; font-size: 90%; }
+.Points tr + tr td { border-top: 1px solid rgba(127, 127, 127, 0.3); }
+.Points td.Actions { text-align: right; white-space: nowrap; }
+.Points tr.Confirm td { background: rgba(255, 200, 0, 0.15); }
+.Points tr.Confirm ul { margin: 4px 0 8px 18px; }
+.Game .More { margin: 4px 10px 8px; }
+.Warning { color: #c60; font-weight: bold; }
+.Status { font-weight: bold; }
+.Game > .Summary .Badge.Abandoned { background: #999; }
+.Messages { padding: 0 10px; }
+.Messages p { margin: 6px 0; }

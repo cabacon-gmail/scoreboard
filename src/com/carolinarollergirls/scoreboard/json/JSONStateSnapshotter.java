@@ -43,9 +43,13 @@ public final class JSONStateSnapshotter implements JSONStateListener {
 
     /**
      * Writes the game's file, and keeps a restore point, once the current batch of changes has been applied.
-     * {@code reason} names the moment: {@code jam-end}, {@code timeout-end}, {@code period-end}.
+     * {@code reason} names the moment ({@code jam-end}, {@code timeout-end}, {@code official-score}); an empty
+     * reason writes the game's file only.
      */
-    public void writeOnNextUpdate(String reason) { writeOnNextUpdate.set(reason); }
+    public void writeOnNextUpdate(String reason) {
+        // An empty reason writes the file without a restore point, and never replaces a pending reason.
+        writeOnNextUpdate.updateAndGet(cur -> reason.isEmpty() && cur != null ? cur : reason);
+    }
 
     public synchronized void setFilename(String newName) { filename = newName; }
 
@@ -75,8 +79,10 @@ public final class JSONStateSnapshotter implements JSONStateListener {
             file.renameTo(prev);
             if (tmp.renameTo(file)) { prev.delete(); }
             // Also keep this version as a restore point for the Recovery screen.
-            String error = Checkpoints.write(filename, gameId, gameState, json, reason);
-            reportCheckpointError(error == null ? "" : error);
+            if (!reason.isEmpty()) {
+                String error = Checkpoints.write(filename, gameId, gameState, json, reason);
+                reportCheckpointError(error == null ? "" : error);
+            }
         } catch (Exception e) { Logger.printStackTrace("writing JSON snapshot", e); } finally {
             if (out != null) {
                 try {

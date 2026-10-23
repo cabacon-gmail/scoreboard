@@ -134,8 +134,10 @@ public final class Recovery {
             if (state == null) { return; }
             for (String id : Checkpoints.games(state)) {
                 Map<String, Object> s = Checkpoints.summarize(state, id);
-                if ("Prepared".equals(String.valueOf(s.get("state")))) { continue; } // not started: nothing to
-                                                                                       // restore
+                if ("Prepared".equals(String.valueOf(s.get("state")))) {
+                    continue;
+                } // not started: nothing to
+                  // restore
                 s.put("source", source);
                 s.put("path", path);
                 s.put("reason", source);

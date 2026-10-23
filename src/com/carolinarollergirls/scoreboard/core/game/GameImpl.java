@@ -939,7 +939,8 @@ public final class GameImpl extends ScoreBoardEventProviderImpl<Game> implements
         Clock pc = getClock(Clock.ID_PERIOD);
         Clock lc = getClock(Clock.ID_LINEUP);
 
-        if (getCurrentTimeout().isRunning()) { getCurrentTimeout().stop(jamFollows); }
+        boolean timeoutEnded = getCurrentTimeout().isRunning();
+        if (timeoutEnded) { getCurrentTimeout().stop(jamFollows); }
         if (!getBoolean(Rule.NO_TO_CLOCK_STOP) || jamFollows) {
             tc.stop();
             set(CURRENT_TIMEOUT, noTimeoutDummy);
@@ -953,7 +954,8 @@ public final class GameImpl extends ScoreBoardEventProviderImpl<Game> implements
                 lc.set(Clock.NAME, "Post Timeout");
             }
         }
-        jsonSnapshotter.writeOnNextUpdate("timeout-end");
+        // Only an actual timeout ending is a restore point; this also runs when a jam starts after a timeout.
+        jsonSnapshotter.writeOnNextUpdate(timeoutEnded ? "timeout-end" : "");
     }
     private void _startIntermission() {
         Clock ic = getClock(Clock.ID_INTERMISSION);

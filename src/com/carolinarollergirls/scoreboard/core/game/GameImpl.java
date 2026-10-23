@@ -349,6 +349,10 @@ public final class GameImpl extends ScoreBoardEventProviderImpl<Game> implements
                 .replace("%S", getTeam(Team.ID_1).get(Team.SCORE) + " - " + getTeam(Team.ID_2).get(Team.SCORE))
                 .trim();
         } else if (prop == FILENAME) {
+            if (flag == Flag.SPECIAL_CASE && value != null && !"".equals(value) && !source.isFile()) {
+                // An explicit new name: abandoning a game, or giving a restored copy the original's name.
+                return explicitFilename((String) value);
+            }
             if (get(STATE) != State.PREPARED && flag != Flag.SPECIAL_CASE) { // we have already written a file
                 return source.isFile() ? value : last;
             }
@@ -466,7 +470,7 @@ public final class GameImpl extends ScoreBoardEventProviderImpl<Game> implements
                 if (pc.isRunning()) { pc.stop(); }
                 _startIntermission();
             }
-            jsonSnapshotter.writeOnNextUpdate();
+            jsonSnapshotter.writeOnNextUpdate("official-score");
         }
         if (prop == OR_IS_TO && getCurrentTimeout().isRunning()) {
             if ((boolean) value && "".equals(getCurrentTimeout().get(Timeout.OR_REQUEST))) {
@@ -551,7 +555,7 @@ public final class GameImpl extends ScoreBoardEventProviderImpl<Game> implements
                 set(UPDATE_IN_PROGRESS, true);
                 statsbookExporter = new StatsbookExporter(this);
             }
-            jsonSnapshotter.writeFile();
+            jsonSnapshotter.writeFile("export");
         } else if (prop == START_BOX_TRIP) {
             add(Team.BOX_TRIP, new BoxTripImpl(this));
         } else if (prop == START_JAMMER_BOX_TRIP) {
@@ -885,7 +889,7 @@ public final class GameImpl extends ScoreBoardEventProviderImpl<Game> implements
         if (getTeam(Team.ID_1).get(Team.OFFICIAL_REVIEWS) > 0 || getTeam(Team.ID_2).get(Team.OFFICIAL_REVIEWS) > 0) {
             earliestFinalScoreTime = ScoreBoardClock.getInstance().getCurrentTime() + getLong(Rule.LINEUP_DURATION);
         }
-        jsonSnapshotter.writeOnNextUpdate();
+        jsonSnapshotter.writeOnNextUpdate("jam-end");
     }
     private void _startLineup() {
         Clock lc = getClock(Clock.ID_LINEUP);
@@ -935,7 +939,8 @@ public final class GameImpl extends ScoreBoardEventProviderImpl<Game> implements
         Clock pc = getClock(Clock.ID_PERIOD);
         Clock lc = getClock(Clock.ID_LINEUP);
 
-        if (getCurrentTimeout().isRunning()) { getCurrentTimeout().stop(jamFollows); }
+        boolean timeoutEnded = getCurrentTimeout().isRunning();
+        if (timeoutEnded) { getCurrentTimeout().stop(jamFollows); }
         if (!getBoolean(Rule.NO_TO_CLOCK_STOP) || jamFollows) {
             tc.stop();
             set(CURRENT_TIMEOUT, noTimeoutDummy);
@@ -949,7 +954,8 @@ public final class GameImpl extends ScoreBoardEventProviderImpl<Game> implements
                 lc.set(Clock.NAME, "Post Timeout");
             }
         }
-        jsonSnapshotter.writeOnNextUpdate();
+        // Only an actual timeout ending is a restore point; this also runs when a jam starts after a timeout.
+        jsonSnapshotter.writeOnNextUpdate(timeoutEnded ? "timeout-end" : "");
     }
     private void _startIntermission() {
         Clock ic = getClock(Clock.ID_INTERMISSION);
@@ -1239,6 +1245,39 @@ public final class GameImpl extends ScoreBoardEventProviderImpl<Game> implements
             fullName = baseName + "_" + String.valueOf(suffix);
         }
         return fullName;
+    }
+
+    /** {@code name}, unless another game already uses it; then {@code name_1}, {@code name_2}, ... */
+    private String explicitFilename(String name) {
+        String fullName = name;
+        for (int suffix = 1;; suffix++) {
+            boolean used = false;
+            for (Game g : scoreBoard.getAll(ScoreBoard.GAME)) {
+                if (g != this && fullName.equals(g.getFilename())) { used = true; }
+            }
+            if (!used) { return fullName; }
+            fullName = name + "_" + suffix;
+        }
+    }
+
+    @Override
+    public void abandon(String label) {
+        synchronized (coreLock) {
+            requestBatchStart();
+            for (Clock c : getAll(CLOCK)) {
+                if (c.isRunning()) { c.stop(); }
+            }
+            set(NAME_FORMAT, get(NAME_FORMAT) + " (abandoned " + label + ")");
+            set(FILENAME, getFilename() + "_abandoned-" + label.replaceAll("\\W+", ""), Source.OTHER,
+                Flag.SPECIAL_CASE);
+            requestBatchEnd();
+            jsonSnapshotter.writeOnNextUpdate("abandoned");
+        }
+    }
+
+    @Override
+    public void saveRestorePoint(String reason) {
+        jsonSnapshotter.writeOnNextUpdate(reason);
     }
 
     public boolean filenameIsUsed(String filename) {

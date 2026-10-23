@@ -2263,4 +2263,26 @@ public class GameImplTests {
         g.set(Rule.NUMBER_PERIODS, "zz");
         assertEquals(6, g.getInt(Rule.NUMBER_PERIODS));
     }
+
+    @Test
+    public void testAbandonSetsTheGameAside() {
+        g.startJam();
+        assertTrue(jc.isRunning());
+        String filename = g.getFilename();
+        g.abandon("12:34");
+        assertFalse(jc.isRunning());
+        assertFalse(pc.isRunning());
+        assertTrue(g.get(Game.NAME), g.get(Game.NAME).contains("(abandoned 12:34)"));
+        assertEquals(filename + "_abandoned-1234", g.getFilename());
+    }
+
+    @Test
+    public void testExplicitFilenameIsKeptAfterStart() {
+        g.startJam();
+        g.set(Game.FILENAME, "STATS-restored", Source.OTHER, Flag.SPECIAL_CASE);
+        assertEquals("STATS-restored", g.getFilename());
+        // Without an explicit name, a started game keeps its file name.
+        g.set(Game.FILENAME, "STATS-other");
+        assertEquals("STATS-restored", g.getFilename());
+    }
 }

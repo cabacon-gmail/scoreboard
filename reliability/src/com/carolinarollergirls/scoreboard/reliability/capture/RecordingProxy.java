@@ -38,6 +38,8 @@ import com.fasterxml.jackson.jr.ob.JSON;
  *   ... play the game; Ctrl-C to stop. The trace is in reliability/captures/&lt;date-time&gt;/trace.crgtrace.jsonl
  * </pre>
  *
+ * Every request it forwards carries {@code X-CRG-Forwarded-For} with the device's address, so CRG can tell devices
+ * apart from its own computer.
  * What it records: the starting state (from {@code /SaveJSON}, without device records), every WebSocket connect,
  * message and disconnect, and state-changing HTTP requests (POSTs, with uploaded files). What it changes: it removes
  * {@code Sec-WebSocket-Extensions} from upgrade requests, so frames are not compressed and can be read, and it
@@ -211,6 +213,10 @@ public final class RecordingProxy {
             while (true) {
                 HttpIO.Head req = HttpIO.readHead(cin);
                 if (req == null) { return; }
+                // Tell CRG the request came through a proxy, so it knows the device isn't the scoreboard's own
+                // computer (the Recovery screen restores only from there). Never trust a client-sent value.
+                req.removeHeader("X-CRG-Forwarded-For");
+                req.headers.add("X-CRG-Forwarded-For: " + client.getInetAddress().getHostAddress());
                 String path = req.second();
                 String cookie = crgCookie(req.header("Cookie"));
                 boolean urlsRequest = "GET".equals(req.first()) &&
